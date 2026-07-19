@@ -1,0 +1,179 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http;
+
+use App\Config\AppConfig;
+use App\Repositories\SessionConversationRepository;
+use App\Services\ContextWindowService;
+use App\Services\OllamaClient;
+use App\Services\OllamaStreamException;
+use App\Support\ErrorMessage;
+use Throwable;
+
+final readonly class ChatStreamHandler
+{
+    public function __construct(
+        private AppConfig $config,
+        private OllamaClient $ollamaClient,
+        private SessionConversationRepository $conversationRepository,
+        private ContextWindowService $contextWindowService,
+    ) {
+    }
+
+    /**
+     * @param array<int, string> $availableModels
+     */
+    public function handle(string $prompt, string $selectedModel, array $availableModels): never
+    {
+        ini_set('display_errors', '0');
+        $this->applyExecutionLimit();
+
+        $headersSent = false;
+        $systemPrompt = $this->conversationRepository->systemPrompt($this->config->defaultSystemPrompt);
+        $conversationMessages = $this->conversationRepository->messages();
+
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        register_shutdown_function(static function () use (&$headersSent): void {
+            $error = error_get_last();
+
+            if (!$error || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                return;
+            }
+
+            if (!$headersSent) {
+                NdjsonResponse::start();
+                $headersSent = true;
+            }
+
+            NdjsonResponse::emit([
+                'type' => 'error',
+                'message' => ErrorMessage::technical($error['message']),
+                'context_reset' => false,
+            ]);
+        });
+
+        try {
+            if ($prompt === '') {
+                http_response_code(422);
+                echo 'Mensagem vazia.';
+                exit;
+            }
+
+            if ($availableModels && !in_array($selectedModel, $availableModels, true)) {
+                http_response_code(400);
+                echo 'Modelo selecionado não está disponível no Ollama local.';
+                exit;
+            }
+
+            $conversationMessages[] = [
+                'role' => 'user',
+                'content' => $prompt,
+            ];
+
+            $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $systemPrompt);
+            $messagesForContext = $this->contextWindowService->withSystemPrompt($systemPrompt, $conversationMessages);
+
+            NdjsonResponse::start();
+            $headersSent = true;
+
+            try {
+                $assistantResponse = $this->ollamaClient->streamChat([
+                    'model' => $selectedModel,
+                    'messages' => $messagesForContext,
+                    'stream' => true,
+                ], static function (array $payload): void {
+                    NdjsonResponse::emit($payload);
+                });
+            } catch (OllamaStreamException $error) {
+                $this->emitRequestError($error->getMessage(), $systemPrompt, $messagesForContext);
+                exit;
+            }
+
+            if ($assistantResponse === '') {
+                NdjsonResponse::emit([
+                    'type' => 'error',
+                    'message' => 'A IA não retornou conteúdo.',
+                    'context_reset' => false,
+                    'context_usage' => $this->contextWindowService->usage($messagesForContext),
+                ]);
+                exit;
+            }
+
+            $conversationMessages[] = [
+                'role' => 'assistant',
+                'content' => $assistantResponse,
+            ];
+
+            $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $systemPrompt) || $contextWasTrimmed;
+            $this->conversationRepository->replaceMessages($conversationMessages);
+
+            NdjsonResponse::emit([
+                'type' => 'meta',
+                'context_usage' => $this->contextWindowService->usage(
+                    $this->contextWindowService->withSystemPrompt($systemPrompt, $conversationMessages)
+                ),
+                'context_trimmed' => $contextWasTrimmed,
+            ]);
+
+            exit;
+        } catch (Throwable $error) {
+            if (!$headersSent) {
+                NdjsonResponse::start();
+            }
+
+            NdjsonResponse::emit([
+                'type' => 'error',
+                'message' => ErrorMessage::technical($error->getMessage()),
+                'context_reset' => false,
+                'context_usage' => $this->contextWindowService->usage(
+                    $this->contextWindowService->withSystemPrompt($systemPrompt, $conversationMessages)
+                ),
+            ]);
+            exit;
+        }
+    }
+
+    /**
+     * @param array<int, array<string, string>> $messagesForContext
+     */
+    private function emitRequestError(string $requestError, string $systemPrompt, array $messagesForContext): void
+    {
+        if (ErrorMessage::isContextWindowError($requestError)) {
+            $this->conversationRepository->replaceMessages([]);
+
+            NdjsonResponse::emit([
+                'type' => 'error',
+                'message' => 'O contexto ficou grande demais e foi resetado automaticamente para manter a fluidez.',
+                'context_reset' => true,
+                'context_usage' => $this->contextWindowService->usage([
+                    [
+                        'role' => 'system',
+                        'content' => $systemPrompt,
+                    ],
+                ]),
+            ]);
+            return;
+        }
+
+        NdjsonResponse::emit([
+            'type' => 'error',
+            'message' => ErrorMessage::technical($requestError),
+            'context_reset' => false,
+            'context_usage' => $this->contextWindowService->usage($messagesForContext),
+        ]);
+    }
+
+    private function applyExecutionLimit(): void
+    {
+        ini_set('max_execution_time', (string) $this->config->ollamaResponseTimeout);
+
+        if (function_exists('set_time_limit')) {
+            set_time_limit($this->config->ollamaResponseTimeout);
+        }
+    }
+}
