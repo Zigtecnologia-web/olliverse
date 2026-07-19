@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Config\AppConfig;
 use App\Http\ChatStreamHandler;
 use App\Repositories\SqliteConversationRepository;
+use App\Repositories\SqlitePersonaRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
@@ -26,6 +27,7 @@ $pdo = $app['pdo'];
 
 $availableModels = $ollamaClient->listModels();
 $defaultModel = ModelSelector::defaultModel($availableModels, $config->preferredModels);
+$personaRepository = new SqlitePersonaRepository($pdo, $config->defaultSystemPrompt);
 
 if (($_GET['action'] ?? '') === 'model_metadata') {
     $selectedModel = trim((string) ($_GET['model'] ?? ''));
@@ -46,23 +48,26 @@ if (($_GET['action'] ?? '') === 'model_metadata') {
 
 if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
     $currentChatId = (int) ($_GET['chat_id'] ?? 0);
-    $systemPromptForNewChat = SqliteConversationRepository::systemPromptForChat($pdo, $currentChatId)
-        ?? $config->defaultSystemPrompt;
+    $activePersona = $personaRepository->activeForChat($currentChatId);
 
     redirectToChat(SqliteConversationRepository::createChat(
         $pdo,
         $defaultModel,
-        $systemPromptForNewChat
+        (string) $activePersona['prompt_content'],
+        (int) $activePersona['id']
     ));
 }
 
 $chatId = (int) ($_GET['chat_id'] ?? 0);
 
 if ($chatId <= 0 || !SqliteConversationRepository::exists($pdo, $chatId)) {
+    $activePersona = $personaRepository->activeForChat(0);
+
     redirectToChat(SqliteConversationRepository::createChat(
         $pdo,
         $defaultModel,
-        $config->defaultSystemPrompt
+        (string) $activePersona['prompt_content'],
+        (int) $activePersona['id']
     ));
 }
 
@@ -79,6 +84,59 @@ $chatStreamHandler = new ChatStreamHandler(
     $contextWindowService
 );
 $systemPrompt = $conversationRepository->systemPrompt($config->defaultSystemPrompt);
+$personas = $personaRepository->all();
+$activePersona = $personaRepository->activeForChat($chatId);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['persona_action'])) {
+    try {
+        $personaAction = (string) $_POST['persona_action'];
+        $persona = null;
+
+        if ($personaAction === 'select') {
+            $persona = $personaRepository->setChatPersona($chatId, (int) ($_POST['persona_id'] ?? 0));
+        } elseif ($personaAction === 'create') {
+            $persona = $personaRepository->create(
+                (string) ($_POST['name'] ?? ''),
+                (string) ($_POST['description'] ?? ''),
+                (string) ($_POST['prompt_content'] ?? '')
+            );
+            $persona = $personaRepository->setChatPersona($chatId, (int) $persona['id']);
+        } elseif ($personaAction === 'update') {
+            $persona = $personaRepository->update(
+                (int) ($_POST['persona_id'] ?? 0),
+                (string) ($_POST['name'] ?? ''),
+                (string) ($_POST['description'] ?? ''),
+                (string) ($_POST['prompt_content'] ?? '')
+            );
+
+            if ((int) $activePersona['id'] === (int) $persona['id']) {
+                $persona = $personaRepository->setChatPersona($chatId, (int) $persona['id']);
+            }
+        } elseif ($personaAction === 'delete') {
+            $personaRepository->delete((int) ($_POST['persona_id'] ?? 0));
+            $persona = $personaRepository->activeForChat($chatId);
+        } else {
+            throw new RuntimeException('Ação de persona inválida.');
+        }
+
+        jsonResponse([
+            'success' => true,
+            'persona' => $persona,
+            'personas' => $personaRepository->all(),
+            'context_usage' => $contextWindowService->usage(
+                $contextWindowService->withSystemPrompt(
+                    (string) $persona['prompt_content'],
+                    $conversationRepository->messages()
+                )
+            ),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_prompt'])) {
     $systemPrompt = $conversationRepository->replaceSystemPrompt(
@@ -124,5 +182,16 @@ function iconeEnviar(): string
 function iconSvg(string $name): string
 {
     return IconSvg::render($name);
+}
+
+/**
+ * @param array<string, mixed> $payload
+ */
+function jsonResponse(array $payload, int $status = 200): never
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=UTF-8');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
 }
 require __DIR__ . '/views/chat.php';

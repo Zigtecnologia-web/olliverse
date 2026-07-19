@@ -17,7 +17,7 @@ body {
 
 .chat-container {
     width: 100%;
-    max-width: 800px;
+    max-width: 1100px;
     height: 85vh;
     background-color: #1e1e24;
     border-radius: 12px;
@@ -41,7 +41,9 @@ body {
 .header-title {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
+    flex: 1;
     min-width: 0;
 }
 
@@ -52,15 +54,33 @@ body {
     white-space: nowrap;
 }
 
+.model-controls {
+    align-items: center;
+    display: flex;
+    flex: 1;
+    gap: 10px;
+    min-width: 0;
+}
+
 .model-field {
     align-items: center;
     display: flex;
+    flex: 1.15;
     gap: 8px;
-    min-width: 250px;
+    min-width: 230px;
     position: relative;
 }
 
-.model-field label {
+.persona-field {
+    align-items: center;
+    display: flex;
+    flex: 0.85;
+    gap: 8px;
+    min-width: 170px;
+}
+
+.model-field label,
+.persona-field label {
     color: #a8a8b3;
     font-size: 0.78rem;
     font-weight: 600;
@@ -152,6 +172,29 @@ body {
     background-color: rgba(4, 211, 97, 0.1);
     color: #e1e1e6;
     outline: none;
+}
+
+.persona-select {
+    background-color: #323238;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #c4c4cc;
+    font-size: 0.78rem;
+    min-width: 150px;
+    outline: none;
+    padding: 8px;
+    width: 100%;
+}
+
+.persona-select:focus {
+    border-color: #04d361;
+    color: #e1e1e6;
+}
+
+.persona-select:disabled {
+    color: #7c7c8a;
+    cursor: not-allowed;
+    opacity: 0.75;
 }
 
 .model-info-btn {
@@ -694,8 +737,25 @@ body {
     border: 1px solid #323238;
     border-radius: 8px;
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+    max-height: min(720px, 92vh);
     max-width: 560px;
+    overflow-y: auto;
+    scrollbar-color: #323238 #1e1e24;
+    scrollbar-width: thin;
     width: 100%;
+}
+
+.skill-modal::-webkit-scrollbar {
+    width: 6px;
+}
+
+.skill-modal::-webkit-scrollbar-track {
+    background: #1e1e24;
+}
+
+.skill-modal::-webkit-scrollbar-thumb {
+    background: #323238;
+    border-radius: 3px;
 }
 
 .modal-header,
@@ -759,6 +819,7 @@ body {
 }
 
 .skill-select,
+.skill-input,
 .skill-textarea {
     background-color: #121214;
     border: 1px solid #323238;
@@ -771,6 +832,7 @@ body {
 }
 
 .skill-select:focus,
+.skill-input:focus,
 .skill-textarea:focus {
     border-color: #04d361;
 }
@@ -785,6 +847,11 @@ body {
     color: #04d361;
     font-size: 0.82rem;
     min-height: 1rem;
+}
+
+.persona-library-actions {
+    display: flex;
+    gap: 8px;
 }
 
 .modal-footer {
@@ -807,6 +874,66 @@ body {
 .save-config-btn:focus {
     background-color: #05e66b;
     outline: none;
+}
+
+.secondary-config-btn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #e1e1e6;
+    cursor: pointer;
+    font-size: 0.84rem;
+    font-weight: 650;
+    padding: 9px 12px;
+}
+
+.secondary-config-btn:hover,
+.secondary-config-btn:focus {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: #04d361;
+    color: #04d361;
+    outline: none;
+}
+
+.secondary-config-btn.danger:hover,
+.secondary-config-btn.danger:focus {
+    background-color: rgba(247, 90, 104, 0.1);
+    border-color: #f75a68;
+    color: #f75a68;
+}
+
+.secondary-config-btn:disabled {
+    color: #7c7c8a;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.persona-toast {
+    background-color: #202027;
+    border: 1px solid #04d361;
+    border-radius: 8px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.38);
+    color: #e1e1e6;
+    font-size: 0.86rem;
+    font-weight: 650;
+    left: 50%;
+    opacity: 0;
+    padding: 11px 14px;
+    pointer-events: none;
+    position: fixed;
+    top: 18px;
+    transform: translate(-50%, -10px);
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 9500;
+}
+
+.persona-toast.visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.persona-toast.error {
+    border-color: #f75a68;
 }
 
 .typing-indicator {
@@ -848,6 +975,7 @@ body {
 
     .header-title {
         flex-wrap: wrap;
+        width: 100%;
     }
 
     .new-chat-btn {
@@ -862,7 +990,17 @@ body {
         flex: 0 0 36px;
     }
 
+    .model-controls {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
     .model-field {
+        width: 100%;
+    }
+
+    .persona-field {
         width: 100%;
     }
 

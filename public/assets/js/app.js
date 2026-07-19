@@ -2,11 +2,11 @@ const {
     initialAssistantMessage,
     hasAvailableModels,
     initialContextUsage,
-    skillPresets,
 } = window.OlliverseConfig;
 marked.setOptions({ breaks: true });
 updateContextUsage(initialContextUsage);
 initModelPicker();
+initPersonaControls();
 
 document.getElementById('chatForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -15,6 +15,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     const modelSelect = document.getElementById('modelSelect');
     const modelMenuButton = document.getElementById('modelMenuButton');
     const modelInfoBtn = document.getElementById('modelInfoBtn');
+    const personaSelect = document.getElementById('personaSelect');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChatBtn');
     const messagesContainer = document.getElementById('chatMessages');
@@ -32,6 +33,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     modelSelect.disabled = true;
     modelMenuButton.disabled = true;
     modelInfoBtn.disabled = true;
+    personaSelect.disabled = true;
     sendBtn.disabled = true;
     newChatBtn.disabled = true;
 
@@ -77,6 +79,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
         modelSelect.disabled = !hasAvailableModels;
         modelMenuButton.disabled = !hasAvailableModels;
         modelInfoBtn.disabled = !hasAvailableModels;
+        personaSelect.disabled = false;
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
         inputEl.focus();
@@ -109,20 +112,18 @@ document.getElementById('skillModal').addEventListener('click', function(event) 
         closeSkillModal();
     }
 });
-document.getElementById('skillPreset').addEventListener('change', function(event) {
-    const presetValue = event.target.value;
-
-    if (skillPresets[presetValue]) {
-        document.getElementById('systemPromptInput').value = skillPresets[presetValue];
-    }
-});
-document.getElementById('systemPromptInput').addEventListener('input', function() {
-    document.getElementById('skillPreset').value = 'custom';
-});
 document.getElementById('skillForm').addEventListener('submit', function(event) {
     event.preventDefault();
     saveSkillConfig();
 });
+document.getElementById('personaSelect').addEventListener('change', function(event) {
+    selectPersona(Number(event.target.value));
+});
+document.getElementById('personaLibrarySelect').addEventListener('change', function(event) {
+    fillPersonaForm(Number(event.target.value));
+});
+document.getElementById('newPersonaBtn').addEventListener('click', startNewPersona);
+document.getElementById('deletePersonaBtn').addEventListener('click', deleteSelectedPersona);
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape' && document.getElementById('skillModal').classList.contains('open')) {
         closeSkillModal();

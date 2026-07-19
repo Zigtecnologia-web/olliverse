@@ -61,6 +61,12 @@ final readonly class SqliteConversationRepository implements ConversationReposit
 
     public function systemPrompt(string $defaultPrompt): string
     {
+        $personaPrompt = (new SqlitePersonaRepository($this->pdo, $defaultPrompt))->promptForChat($this->chatId);
+
+        if (trim($personaPrompt) !== '') {
+            return $personaPrompt;
+        }
+
         $statement = $this->pdo->prepare('SELECT system_prompt FROM chats WHERE id = :id');
         $statement->execute(['id' => $this->chatId]);
         $systemPrompt = $statement->fetchColumn();
@@ -75,11 +81,19 @@ final readonly class SqliteConversationRepository implements ConversationReposit
     public function replaceSystemPrompt(string $systemPrompt, string $defaultPrompt): string
     {
         $nextPrompt = trim($systemPrompt) !== '' ? trim($systemPrompt) : $defaultPrompt;
+        $persona = (new SqlitePersonaRepository($this->pdo, $defaultPrompt))->create(
+            'Persona personalizada',
+            'Criada a partir da configuração rápida do chat.',
+            $nextPrompt
+        );
+        (new SqlitePersonaRepository($this->pdo, $defaultPrompt))->setChatPersona($this->chatId, (int) $persona['id']);
+
         $statement = $this->pdo->prepare(
-            'UPDATE chats SET system_prompt = :system_prompt, updated_at = :updated_at WHERE id = :id'
+            'UPDATE chats SET system_prompt = :system_prompt, persona_id = :persona_id, updated_at = :updated_at WHERE id = :id'
         );
         $statement->execute([
             'system_prompt' => $nextPrompt,
+            'persona_id' => $persona['id'],
             'updated_at' => $this->now(),
             'id' => $this->chatId,
         ]);
@@ -111,17 +125,18 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         return $contextWasTrimmed;
     }
 
-    public static function createChat(PDO $pdo, string $model, string $systemPrompt): int
+    public static function createChat(PDO $pdo, string $model, string $systemPrompt, ?int $personaId = null): int
     {
         $now = self::timestamp();
         $statement = $pdo->prepare(
-            'INSERT INTO chats (title, model_used, system_prompt, created_at, updated_at)
-             VALUES (:title, :model_used, :system_prompt, :created_at, :updated_at)'
+            'INSERT INTO chats (title, model_used, system_prompt, persona_id, created_at, updated_at)
+             VALUES (:title, :model_used, :system_prompt, :persona_id, :created_at, :updated_at)'
         );
         $statement->execute([
             'title' => 'Nova conversa',
             'model_used' => $model,
             'system_prompt' => $systemPrompt,
+            'persona_id' => $personaId,
             'created_at' => $now,
             'updated_at' => $now,
         ]);

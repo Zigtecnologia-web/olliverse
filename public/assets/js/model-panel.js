@@ -166,9 +166,11 @@ function openSkillModal() {
     const modal = document.getElementById('skillModal');
 
     document.getElementById('skillStatus').textContent = '';
+    renderPersonaLibraryOptions();
+    fillPersonaForm(Number(window.OlliverseConfig.activePersona.id));
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
-    document.getElementById('systemPromptInput').focus();
+    document.getElementById('personaNameInput').focus();
 }
 
 function closeSkillModal() {
@@ -181,26 +183,222 @@ function closeSkillModal() {
 
 function saveSkillConfig() {
     const statusEl = document.getElementById('skillStatus');
+    const selectedId = Number(document.getElementById('personaLibrarySelect').value);
+    const isNewPersona = document.getElementById('personaLibrarySelect').dataset.mode === 'new';
+    const action = isNewPersona ? 'create' : 'update';
+    const nameValue = document.getElementById('personaNameInput').value.trim();
+    const descriptionValue = document.getElementById('personaDescriptionInput').value.trim();
     const promptValue = document.getElementById('systemPromptInput').value.trim();
 
     statusEl.textContent = 'Salvando...';
+
+    const body = new URLSearchParams({
+        persona_action: action,
+        name: nameValue,
+        description: descriptionValue,
+        prompt_content: promptValue,
+    });
+
+    if (!isNewPersona) {
+        body.set('persona_id', String(selectedId));
+    }
 
     fetch(window.location.href, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: 'system_prompt=' + encodeURIComponent(promptValue)
+        body: body.toString()
     })
     .then(response => {
-        if (!response.ok) throw new Error('Erro ao salvar configuração.');
-        return response.json();
+        return response.json().then((payload) => {
+            if (!response.ok || payload.success === false) {
+                throw new Error(payload.error || 'Erro ao salvar persona.');
+            }
+
+            return payload;
+        });
     })
-    .then(() => {
-        statusEl.textContent = 'Configuração salva.';
-        window.setTimeout(closeSkillModal, 700);
+    .then((payload) => {
+        syncPersonaState(payload);
+        statusEl.textContent = 'Persona salva.';
+        showPersonaToast(`Persona alterada para ${payload.persona.name}`);
     })
     .catch(error => {
         statusEl.textContent = error.message;
     });
+}
+
+function initPersonaControls() {
+    renderPersonaSelect();
+    renderPersonaLibraryOptions();
+}
+
+function selectPersona(personaId) {
+    const persona = findPersona(personaId);
+    const personaSelect = document.getElementById('personaSelect');
+
+    if (!persona) {
+        return;
+    }
+
+    personaSelect.disabled = true;
+
+    const body = new URLSearchParams({
+        persona_action: 'select',
+        persona_id: String(personaId),
+    });
+
+    fetch(window.location.href, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Erro ao alterar persona.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        syncPersonaState(payload);
+        showPersonaToast(`Persona alterada para ${payload.persona.name}`);
+    })
+    .catch((error) => {
+        personaSelect.value = String(window.OlliverseConfig.activePersona.id);
+        showPersonaToast(error.message || 'Erro ao alterar persona.', true);
+    })
+    .finally(() => {
+        personaSelect.disabled = false;
+    });
+}
+
+function deleteSelectedPersona() {
+    const statusEl = document.getElementById('skillStatus');
+    const personaId = Number(document.getElementById('personaLibrarySelect').value);
+    const persona = findPersona(personaId);
+
+    if (!persona) {
+        return;
+    }
+
+    statusEl.textContent = 'Excluindo...';
+
+    const body = new URLSearchParams({
+        persona_action: 'delete',
+        persona_id: String(personaId),
+    });
+
+    fetch(window.location.href, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Erro ao excluir persona.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        syncPersonaState(payload);
+        statusEl.textContent = 'Persona excluída.';
+        showPersonaToast(`Persona alterada para ${payload.persona.name}`);
+    })
+    .catch((error) => {
+        statusEl.textContent = error.message;
+    });
+}
+
+function syncPersonaState(payload) {
+    window.OlliverseConfig.personas = payload.personas || window.OlliverseConfig.personas;
+    window.OlliverseConfig.activePersona = payload.persona || window.OlliverseConfig.activePersona;
+
+    if (payload.context_usage) {
+        updateContextUsage(payload.context_usage);
+    }
+
+    renderPersonaSelect();
+    renderPersonaLibraryOptions();
+    fillPersonaForm(Number(window.OlliverseConfig.activePersona.id));
+}
+
+function renderPersonaSelect() {
+    const select = document.getElementById('personaSelect');
+
+    select.innerHTML = '';
+
+    window.OlliverseConfig.personas.forEach((persona) => {
+        const option = document.createElement('option');
+
+        option.value = String(persona.id);
+        option.textContent = persona.name;
+        option.selected = Number(persona.id) === Number(window.OlliverseConfig.activePersona.id);
+        select.appendChild(option);
+    });
+}
+
+function renderPersonaLibraryOptions() {
+    const select = document.getElementById('personaLibrarySelect');
+
+    select.innerHTML = '';
+    select.dataset.mode = 'edit';
+
+    window.OlliverseConfig.personas.forEach((persona) => {
+        const option = document.createElement('option');
+
+        option.value = String(persona.id);
+        option.textContent = persona.name;
+        option.selected = Number(persona.id) === Number(window.OlliverseConfig.activePersona.id);
+        select.appendChild(option);
+    });
+}
+
+function fillPersonaForm(personaId) {
+    const persona = findPersona(personaId) || window.OlliverseConfig.activePersona;
+    const librarySelect = document.getElementById('personaLibrarySelect');
+
+    librarySelect.dataset.mode = 'edit';
+    librarySelect.value = String(persona.id);
+    document.getElementById('personaNameInput').value = persona.name || '';
+    document.getElementById('personaDescriptionInput').value = persona.description || '';
+    document.getElementById('systemPromptInput').value = persona.prompt_content || '';
+    document.getElementById('deletePersonaBtn').disabled = Number(persona.id) === Number(window.OlliverseConfig.activePersona.id)
+        && window.OlliverseConfig.personas.length <= 1;
+}
+
+function startNewPersona() {
+    const librarySelect = document.getElementById('personaLibrarySelect');
+
+    librarySelect.dataset.mode = 'new';
+    librarySelect.value = '';
+    document.getElementById('personaNameInput').value = '';
+    document.getElementById('personaDescriptionInput').value = '';
+    document.getElementById('systemPromptInput').value = '';
+    document.getElementById('deletePersonaBtn').disabled = true;
+    document.getElementById('skillStatus').textContent = '';
+    document.getElementById('personaNameInput').focus();
+}
+
+function findPersona(personaId) {
+    return window.OlliverseConfig.personas.find((persona) => Number(persona.id) === Number(personaId));
+}
+
+function showPersonaToast(message, isError = false) {
+    const toast = document.getElementById('personaToast');
+
+    toast.textContent = message;
+    toast.classList.toggle('error', isError);
+    toast.classList.add('visible');
+
+    window.clearTimeout(window.OlliverseState.personaToastTimer);
+    window.OlliverseState.personaToastTimer = window.setTimeout(() => {
+        toast.classList.remove('visible');
+    }, 2600);
 }

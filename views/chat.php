@@ -13,30 +13,42 @@
     <div class="chat-header">
         <div class="header-title">
             <h1>Olliverse</h1>
-            <div class="model-field">
-                <label for="modelMenuButton">Modelo</label>
-                <input type="hidden" id="modelSelect" value="<?php echo htmlspecialchars($defaultModel, ENT_QUOTES, 'UTF-8'); ?>">
-                <div class="model-picker" id="modelPicker">
-                    <button type="button" id="modelMenuButton" class="model-menu-button" <?php echo $availableModels ? '' : 'disabled'; ?>>
-                        <span id="selectedModelLabel"><?php echo htmlspecialchars($availableModels ? $defaultModel : 'Nenhum modelo encontrado', ENT_QUOTES, 'UTF-8'); ?></span>
-                    </button>
-                    <div id="modelMenuList" class="model-menu-list" role="listbox" aria-labelledby="modelMenuButton">
-                    <?php if ($availableModels): ?>
-                        <?php foreach ($availableModels as $modelName): ?>
-                            <button type="button" class="model-option <?php echo $modelName === $defaultModel ? 'active' : ''; ?>" role="option" data-model="<?php echo htmlspecialchars($modelName, ENT_QUOTES, 'UTF-8'); ?>" aria-selected="<?php echo $modelName === $defaultModel ? 'true' : 'false'; ?>">
-                                <?php echo htmlspecialchars($modelName, ENT_QUOTES, 'UTF-8'); ?>
-                            </button>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <button type="button" class="model-option" disabled>Nenhum modelo encontrado</button>
-                    <?php endif; ?>
+            <div class="model-controls">
+                <div class="model-field">
+                    <label for="modelMenuButton">Modelo</label>
+                    <input type="hidden" id="modelSelect" value="<?php echo htmlspecialchars($defaultModel, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="model-picker" id="modelPicker">
+                        <button type="button" id="modelMenuButton" class="model-menu-button" <?php echo $availableModels ? '' : 'disabled'; ?>>
+                            <span id="selectedModelLabel"><?php echo htmlspecialchars($availableModels ? $defaultModel : 'Nenhum modelo encontrado', ENT_QUOTES, 'UTF-8'); ?></span>
+                        </button>
+                        <div id="modelMenuList" class="model-menu-list" role="listbox" aria-labelledby="modelMenuButton">
+                        <?php if ($availableModels): ?>
+                            <?php foreach ($availableModels as $modelName): ?>
+                                <button type="button" class="model-option <?php echo $modelName === $defaultModel ? 'active' : ''; ?>" role="option" data-model="<?php echo htmlspecialchars($modelName, ENT_QUOTES, 'UTF-8'); ?>" aria-selected="<?php echo $modelName === $defaultModel ? 'true' : 'false'; ?>">
+                                    <?php echo htmlspecialchars($modelName, ENT_QUOTES, 'UTF-8'); ?>
+                                </button>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <button type="button" class="model-option" disabled>Nenhum modelo encontrado</button>
+                        <?php endif; ?>
+                        </div>
                     </div>
+                    <button type="button" id="modelInfoBtn" class="model-info-btn" aria-label="Informações do modelo" title="Informações do modelo" <?php echo $availableModels ? '' : 'disabled'; ?>><?php echo iconSvg('info'); ?></button>
                 </div>
-                <button type="button" id="modelInfoBtn" class="model-info-btn" aria-label="Informações do modelo" title="Informações do modelo" <?php echo $availableModels ? '' : 'disabled'; ?>><?php echo iconSvg('info'); ?></button>
+                <div class="persona-field">
+                    <label for="personaSelect">Persona</label>
+                    <select id="personaSelect" class="persona-select">
+                        <?php foreach ($personas as $persona): ?>
+                            <option value="<?php echo (int) $persona['id']; ?>" <?php echo (int) $persona['id'] === (int) $activePersona['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars((string) $persona['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
             </div>
         </div>
         <div class="header-actions">
-            <button type="button" id="settingsBtn" class="config-btn" aria-label="Configurações" title="Configurações"><?php echo iconSvg('settings'); ?></button>
+            <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
             <button type="button" id="newChatBtn" class="new-chat-btn">+ Nova conversa</button>
         </div>
     </div>
@@ -110,33 +122,41 @@
 <div class="modal-backdrop" id="skillModal" aria-hidden="true">
     <div class="skill-modal" role="dialog" aria-modal="true" aria-labelledby="skillModalTitle">
         <div class="modal-header">
-            <h2 id="skillModalTitle">Configurações</h2>
-            <button type="button" id="closeSkillModalBtn" class="modal-close-btn" aria-label="Fechar configurações"><?php echo iconSvg('x'); ?></button>
+            <h2 id="skillModalTitle">Biblioteca de Personas</h2>
+            <button type="button" id="closeSkillModalBtn" class="modal-close-btn" aria-label="Fechar biblioteca de personas"><?php echo iconSvg('x'); ?></button>
         </div>
         <form id="skillForm">
             <div class="modal-body">
                 <div class="skill-field">
-                    <label for="skillPreset">Skill</label>
-                    <select id="skillPreset" class="skill-select">
-                        <option value="tecnico">Assistente técnico prestativo</option>
-                        <option value="codigo">Assistente de Código</option>
-                        <option value="escritor">Escritor</option>
-                        <option value="dados">Analista de Dados</option>
-                        <option value="custom">Personalizada</option>
-                    </select>
+                    <label for="personaLibrarySelect">Persona</label>
+                    <select id="personaLibrarySelect" class="skill-select"></select>
+                </div>
+                <div class="persona-library-actions">
+                    <button type="button" id="newPersonaBtn" class="secondary-config-btn">Nova</button>
+                    <button type="button" id="deletePersonaBtn" class="secondary-config-btn danger">Excluir</button>
+                </div>
+                <div class="skill-field">
+                    <label for="personaNameInput">Nome</label>
+                    <input type="text" id="personaNameInput" class="skill-input" name="name" required>
+                </div>
+                <div class="skill-field">
+                    <label for="personaDescriptionInput">Descrição</label>
+                    <input type="text" id="personaDescriptionInput" class="skill-input" name="description">
                 </div>
                 <div class="skill-field">
                     <label for="systemPromptInput">System prompt</label>
-                    <textarea id="systemPromptInput" class="skill-textarea" name="system_prompt"><?php echo htmlspecialchars($systemPrompt, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    <textarea id="systemPromptInput" class="skill-textarea" name="prompt_content"><?php echo htmlspecialchars($systemPrompt, ENT_QUOTES, 'UTF-8'); ?></textarea>
                 </div>
                 <div id="skillStatus" class="skill-status" aria-live="polite"></div>
             </div>
             <div class="modal-footer">
-                <button type="submit" class="save-config-btn">Salvar Configuração</button>
+                <button type="submit" class="save-config-btn">Salvar Persona</button>
             </div>
         </form>
     </div>
 </div>
+
+<div id="personaToast" class="persona-toast" role="status" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -147,12 +167,8 @@
         chatId: <?php echo json_encode($chatId, JSON_UNESCAPED_UNICODE); ?>,
         hasAvailableModels: <?php echo json_encode((bool) $availableModels); ?>,
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
-        skillPresets: {
-            tecnico: 'Você é um assistente técnico prestativo.',
-            codigo: 'Você é um assistente de código sênior. Ajude com soluções claras, seguras e objetivas, priorizando PHP, arquitetura limpa, depuração cuidadosa e exemplos práticos quando necessário.',
-            escritor: 'Você é um escritor cuidadoso. Ajude a revisar, estruturar e melhorar textos com clareza, fluidez, precisão e tom adequado ao público.',
-            dados: 'Você é um analista de dados. Ajude a interpretar informações, criar hipóteses, explicar métricas e propor análises com raciocínio estatístico claro.',
-        },
+        personas: <?php echo json_encode($personas, JSON_UNESCAPED_UNICODE); ?>,
+        activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
     };
     window.OlliverseState = {
         activeTooltipButton: null,

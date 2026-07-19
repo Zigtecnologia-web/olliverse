@@ -24,6 +24,9 @@ spl_autoload_register(static function (string $class): void {
 });
 
 $config = AppConfig::fromEnvironment();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 $ollamaClient = new OllamaClient(
     $config->ollamaBaseUrl,
     $config->ollamaConnectTimeout,

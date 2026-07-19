@@ -1,0 +1,1079 @@
+# Olliverse - Documentacao funcional e tecnica
+
+**Criado por:** Valdiney França  
+**Data de criacao:** 19 de julho de 2026
+
+## 1. Visao geral
+
+O **Olliverse** e uma ferramenta de chat local para interagir com modelos de IA executados pelo **Ollama**. A aplicacao foi construida em **PHP puro**, com **JavaScript vanilla**, **CSS proprio** e persistencia em **SQLite**.
+
+O objetivo atual do projeto e oferecer uma interface simples, elegante e local para conversar com LLMs, escolhendo modelos instalados na maquina, gerenciando personas de comportamento e mantendo historico persistente das conversas.
+
+Em termos praticos, a ferramenta funciona como um cliente web local para Ollama, mas com algumas preocupacoes ja bem definidas:
+
+- manter o `index.php` como ponto inicial da aplicacao;
+- separar responsabilidades entre frontend, backend, servicos, repositorios e banco;
+- persistir conversas e mensagens fora da sessao PHP;
+- permitir troca e edicao de personas, que funcionam como system prompts reutilizaveis;
+- controlar o tamanho do contexto enviado ao modelo;
+- entregar respostas em streaming para a interface;
+- renderizar respostas em Markdown com suporte a blocos de codigo.
+
+## 2. Tipo de ferramenta que esta sendo construida
+
+O projeto esta se consolidando como um **ambiente local de trabalho com IA**.
+
+Ele nao e apenas um chat simples. A arquitetura atual aponta para uma ferramenta pessoal para:
+
+- conversar com modelos locais;
+- alternar modelos conforme disponibilidade no Ollama;
+- criar "modos de trabalho" por persona;
+- manter historico em SQLite;
+- usar a IA para tarefas tecnicas, escrita, analise e refatoracao;
+- evoluir futuramente para busca em historico, RAG, exportacao e organizacao mais avancada de chats.
+
+A ferramenta tem perfil de **cliente local privado**, com baixa dependencia externa. A unica dependencia operacional forte e o Ollama rodando localmente ou em uma URL configurada.
+
+## 3. Stack atual
+
+### Backend
+
+- PHP `>= 8.2`.
+- PHP puro, sem framework.
+- Autoload PSR-4 simples registrado em `bootstrap/app.php`.
+- cURL para comunicacao com Ollama.
+- PDO para SQLite.
+- Classes com `declare(strict_types=1)`.
+
+### Frontend
+
+- HTML renderizado por PHP em `views/chat.php`.
+- JavaScript vanilla modularizado em arquivos separados.
+- CSS proprio em `public/assets/css/app.css`.
+- Bibliotecas via CDN:
+  - `marked` para Markdown;
+  - `DOMPurify` para sanitizacao de HTML;
+  - `highlight.js` para destaque de codigo.
+
+### Banco de dados
+
+- SQLite.
+- Caminho padrao: `storage/database.sqlite`.
+- O banco e criado automaticamente se nao existir.
+- As migracoes tambem rodam automaticamente durante o bootstrap.
+
+### IA
+
+- Ollama.
+- Endpoint principal usado: `/api/chat`.
+- Endpoint de listagem de modelos: `/api/tags`.
+- Comando local usado para metadados: `ollama show --verbose`.
+
+## 4. Estrutura de pastas
+
+```text
+.
+├── app
+│   ├── Config
+│   ├── Contracts
+│   ├── Database
+│   ├── Http
+│   ├── Repositories
+│   ├── Services
+│   └── Support
+├── bootstrap
+├── Doc
+├── IA
+│   ├── Agents
+│   └── Specs
+├── public
+│   └── assets
+│       ├── css
+│       └── js
+├── storage
+├── views
+├── composer.json
+└── index.php
+```
+
+## 5. Ponto de entrada da aplicacao
+
+O arquivo `index.php` continua sendo o ponto principal.
+
+Ele e responsavel por:
+
+- carregar o bootstrap;
+- obter configuracoes e servicos;
+- listar os modelos disponiveis no Ollama;
+- escolher o modelo padrao;
+- criar ou recuperar o chat atual;
+- processar acoes GET e POST;
+- montar dados iniciais para a tela;
+- incluir `views/chat.php`.
+
+Apesar de ser o ponto central de entrada, a logica pesada ja foi movida para classes em `app/`.
+
+## 6. Bootstrap e inicializacao
+
+O arquivo `bootstrap/app.php` prepara a aplicacao.
+
+Ele faz:
+
+- registro do autoload para classes `App\`;
+- leitura das configuracoes via `AppConfig::fromEnvironment()`;
+- inicio da sessao PHP quando necessario;
+- criacao do cliente Ollama;
+- criacao do servico de janela de contexto;
+- conexao com SQLite;
+- execucao das migracoes;
+- criacao do servico de metadados de modelos.
+
+O retorno do bootstrap e um array simples de dependencias:
+
+```php
+[
+    'config' => $config,
+    'ollama_client' => $ollamaClient,
+    'context_window' => $contextWindowService,
+    'pdo' => $pdo,
+    'model_metadata_service' => $modelMetadataService,
+]
+```
+
+## 7. Configuracoes
+
+As configuracoes ficam em `App\Config\AppConfig`.
+
+Valores suportados por ambiente:
+
+| Variavel | Padrao | Finalidade |
+|---|---:|---|
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | URL base do Ollama |
+| `DEFAULT_SYSTEM_PROMPT` | `Voce e um assistente tecnico prestativo.` | Prompt padrao |
+| `CONTEXT_TOKEN_LIMIT` | `8000` | Limite estimado da janela de contexto |
+| `OLLAMA_CONNECT_TIMEOUT` | `10` | Timeout de conexao com Ollama |
+| `OLLAMA_RESPONSE_TIMEOUT` | `180` | Timeout maximo da resposta |
+| `MODEL_METADATA_CACHE_TTL` | `3600` | Tempo de cache dos metadados do modelo |
+| `SQLITE_DATABASE_PATH` | `storage/database.sqlite` | Caminho do banco SQLite |
+
+Tambem existem modelos preferenciais definidos no codigo:
+
+```php
+['llama3.2:latest', 'llama3.2', 'qwen2.5:0.5b']
+```
+
+Esses nomes sao usados apenas para escolher o modelo padrao quando eles existem na lista retornada pelo Ollama.
+
+## 8. Funcionalidades atuais
+
+### 8.1 Chat com IA local
+
+A funcionalidade central e enviar uma mensagem para um modelo local via Ollama e receber uma resposta.
+
+Fluxo geral:
+
+1. O usuario digita uma mensagem.
+2. O frontend adiciona a mensagem do usuario imediatamente na tela.
+3. O frontend envia `prompt` e `model` via `POST`.
+4. O backend monta o contexto com system prompt/persona e historico.
+5. O backend chama o Ollama em modo streaming.
+6. A resposta chega em partes para o navegador.
+7. O frontend renderiza progressivamente a resposta.
+8. Ao final, a conversa e persistida no SQLite.
+
+### 8.2 Streaming de respostas
+
+A resposta da IA e transmitida em **NDJSON**.
+
+Cada linha enviada pelo backend e um JSON independente. Os tipos atuais sao:
+
+```json
+{"type":"chunk","content":"parte da resposta"}
+{"type":"meta","context_usage":{"tokens":100,"limit":8000,"percentage":1},"context_trimmed":false}
+{"type":"error","message":"Mensagem de erro","context_reset":false}
+```
+
+O streaming evita que o usuario precise esperar a resposta inteira ficar pronta.
+
+No frontend, `chat-stream.js` usa:
+
+- `response.body.getReader()`;
+- `TextDecoder`;
+- buffer por linha;
+- `JSON.parse` por linha NDJSON.
+
+Se o navegador nao suportar streaming via `response.body`, o codigo tenta processar o texto completo ao final.
+
+### 8.3 Persistencia de conversas
+
+As conversas sao persistidas no SQLite.
+
+Tabelas principais:
+
+- `chats`;
+- `messages`;
+- `personas`.
+
+A conversa atual e identificada por `chat_id` na URL.
+
+Exemplo:
+
+```text
+/index.php?chat_id=1
+```
+
+Se o `chat_id` nao existir, a aplicacao cria automaticamente uma nova conversa e redireciona para ela.
+
+### 8.4 Nova conversa
+
+O botao **Nova conversa** chama a URL com `new=1`.
+
+Exemplo:
+
+```text
+/index.php?new=1&chat_id=1
+```
+
+O backend cria um novo registro em `chats`, reaproveitando a persona ativa do chat anterior quando houver um `chat_id` valido.
+
+Tambem existe compatibilidade com:
+
+```text
+?clear=1
+```
+
+No estado atual, `clear=1` cria uma nova conversa, em vez de apenas apagar as mensagens do chat atual.
+
+### 8.5 Selecao de modelo
+
+A aplicacao lista modelos disponiveis no Ollama usando `/api/tags`.
+
+O seletor de modelo:
+
+- mostra os modelos instalados localmente;
+- deixa o campo desabilitado quando nenhum modelo e encontrado;
+- mantem o modelo escolhido em um input hidden;
+- envia o modelo escolhido junto com cada prompt;
+- valida no backend se o modelo selecionado existe na lista retornada pelo Ollama.
+
+Selecao do modelo padrao:
+
+1. tenta encontrar o primeiro modelo da lista de preferencias;
+2. se nao encontrar, usa o primeiro modelo retornado pelo Ollama;
+3. se nao houver nenhum modelo, usa fallback textual `llama3.2:latest`.
+
+### 8.6 Metadados do modelo
+
+O botao de informacoes do modelo abre um modal com:
+
+- tamanho;
+- familia;
+- contexto;
+- quantizacao.
+
+O frontend chama:
+
+```text
+GET ?action=model_metadata&model=nome-do-modelo
+```
+
+O backend:
+
+- valida se o modelo existe;
+- chama `ModelMetadataService`;
+- tenta executar `ollama show --verbose`;
+- extrai informacoes por regex;
+- usa `/api/tags` como fallback para tamanho;
+- guarda o resultado em cache na sessao por `MODEL_METADATA_CACHE_TTL`.
+
+### 8.7 Personas
+
+Personas sao perfis de comportamento da IA. Na pratica, cada persona carrega um `prompt_content` usado como system prompt da conversa.
+
+A UI possui:
+
+- seletor rapido de persona no header;
+- botao de configuracao;
+- modal **Biblioteca de Personas**;
+- campos de nome, descricao e system prompt;
+- acoes para criar, editar e excluir personas;
+- toast visual indicando troca de persona.
+
+Personas padrao semeadas automaticamente:
+
+- Assistente tecnico prestativo;
+- Assistente de Codigo;
+- Escritor;
+- Analista de Dados.
+
+### 8.8 Troca de persona durante a conversa
+
+Quando o usuario troca a persona:
+
+1. o frontend envia `persona_action=select`;
+2. o backend atualiza `persona_id` e `system_prompt` do chat atual;
+3. a persona ativa passa a orientar as proximas respostas;
+4. o historico antigo permanece intacto;
+5. a interface mostra um toast confirmando a alteracao.
+
+Importante: a troca de persona nao reprocessa mensagens antigas. Ela altera o system prompt usado nas proximas interacoes.
+
+### 8.9 CRUD de personas
+
+A biblioteca de personas suporta:
+
+- criar nova persona;
+- editar persona existente;
+- excluir persona;
+- selecionar persona para o chat atual.
+
+Validacoes atuais:
+
+- nome nao pode ficar vazio;
+- prompt da persona nao pode ficar vazio;
+- persona inexistente gera erro;
+- a persona fallback/padrao nao pode ser excluida no backend.
+
+Ao editar uma persona que esta associada a chats, o sistema atualiza o `system_prompt` dos chats vinculados.
+
+### 8.10 Cache de persona ativa
+
+O repositorio de personas usa `$_SESSION['olliverse_persona_cache']` como cache leve por chat.
+
+Esse cache evita consultar a persona ativa repetidamente no banco durante o ciclo da aplicacao.
+
+A fonte definitiva, entretanto, continua sendo o SQLite. A sessao e usada apenas como cache auxiliar.
+
+### 8.11 Janela de contexto
+
+O servico `ContextWindowService` controla o tamanho estimado do contexto.
+
+A estimativa atual e simples:
+
+```text
+tokens estimados = caracteres / 4
+```
+
+O limite padrao e `8000`.
+
+A janela de contexto enviada ao Ollama e montada assim:
+
+1. mensagem `system` com o prompt da persona;
+2. mensagens persistidas do chat, em ordem;
+3. nova mensagem do usuario.
+
+Quando a estimativa passa do limite, o sistema remove mensagens antigas da conversa antes de enviar ao modelo.
+
+O system prompt e preservado fora da tabela `messages` e e reinjetado na montagem do contexto.
+
+### 8.12 Indicador visual de contexto
+
+A area inferior da tela mostra uma barra de uso de contexto.
+
+Ela exibe:
+
+- percentual;
+- tokens estimados;
+- limite configurado.
+
+Estados visuais:
+
+- verde para uso normal;
+- amarelo a partir de 70%;
+- vermelho a partir de 90%.
+
+O indicador e atualizado:
+
+- no carregamento inicial;
+- apos resposta da IA;
+- apos troca ou alteracao de persona, quando o backend retorna `context_usage`.
+
+### 8.13 Tratamento de estouro de contexto
+
+Se o Ollama retornar erro relacionado a contexto, janela ou tokens, o backend trata como erro especifico.
+
+Nesse caso:
+
+- limpa as mensagens persistidas do chat;
+- emite erro NDJSON com `context_reset=true`;
+- retorna uso de contexto baseado apenas no system prompt.
+
+A mensagem exibida ao usuario informa que o contexto ficou grande demais e foi resetado automaticamente.
+
+### 8.14 Tratamento de erros de streaming
+
+O backend desliga `display_errors` durante o streaming para evitar que warnings PHP quebrem o NDJSON.
+
+Tambem registra:
+
+- `set_error_handler`;
+- `register_shutdown_function`;
+- conversao de erros tecnicos em payloads NDJSON do tipo `error`.
+
+No frontend, se chegar uma linha que nao e JSON valido, a interface mostra erro como:
+
+```text
+Resposta inesperada do servidor: ...
+```
+
+Antes de exibir, tags HTML sao removidas da mensagem recebida.
+
+### 8.15 Renderizacao Markdown
+
+Respostas do assistente sao renderizadas como Markdown.
+
+Recursos atuais:
+
+- paragrafos;
+- listas;
+- links;
+- codigo inline;
+- blocos de codigo;
+- highlight com `highlight.js`;
+- sanitizacao com `DOMPurify`.
+
+Se as bibliotecas externas nao carregarem, ha fallback basico de renderizacao.
+
+### 8.16 Normalizacao de blocos de codigo
+
+O arquivo `message-ui.js` possui logicas para corrigir problemas comuns de respostas de LLMs:
+
+- blocos duplicados;
+- codigo sem fence Markdown;
+- fences malformadas como `markdown` contendo outro bloco;
+- codigo plano repetido antes do codigo formatado.
+
+Isso melhora a leitura quando o modelo responde com codigo PHP, JavaScript, HTML ou CSS.
+
+### 8.17 Copiar resposta
+
+Cada resposta final do assistente recebe botao de copiar.
+
+O botao:
+
+- copia o texto original da resposta;
+- usa `navigator.clipboard` quando possivel;
+- usa fallback com `document.execCommand('copy')`;
+- mostra feedback visual de sucesso ou falha.
+
+### 8.18 Reusar pergunta
+
+Cada mensagem do usuario recebe botao para reusar a pergunta.
+
+Ao clicar:
+
+- o texto volta para o input;
+- o campo recebe foco;
+- o cursor e posicionado no final.
+
+Isso ajuda a reenviar perguntas parecidas, trocar modelo ou ajustar prompt.
+
+### 8.19 Modais
+
+A aplicacao possui dois modais principais:
+
+- informacoes do modelo;
+- biblioteca de personas.
+
+Comportamentos atuais:
+
+- abrir por botao;
+- fechar por botao;
+- fechar clicando no backdrop;
+- fechar com `Escape`;
+- foco direcionado para botao de fechar ao abrir.
+
+### 8.20 Layout e experiencia visual
+
+A UI usa tema escuro com destaque verde.
+
+Caracteristicas:
+
+- container centralizado;
+- header com titulo, modelo, persona e acoes;
+- area rolavel para mensagens;
+- input fixo na parte inferior;
+- indicador de contexto;
+- mensagens do usuario alinhadas a direita;
+- mensagens do assistente alinhadas a esquerda;
+- estado de digitacao com pontos animados;
+- responsividade para telas pequenas.
+
+## 9. Contratos HTTP atuais
+
+### 9.1 Abrir chat
+
+```http
+GET /index.php?chat_id=1
+```
+
+Carrega a conversa informada. Se nao existir, cria uma nova conversa.
+
+### 9.2 Criar nova conversa
+
+```http
+GET /index.php?new=1&chat_id=1
+```
+
+Cria novo chat. Quando informado, usa a persona ativa do chat anterior como base.
+
+### 9.3 Compatibilidade de limpeza
+
+```http
+GET /index.php?clear=1
+```
+
+No codigo atual, tambem cria uma nova conversa.
+
+### 9.4 Buscar metadados de modelo
+
+```http
+GET /index.php?action=model_metadata&model=llama3.2:latest
+Accept: application/json
+```
+
+Resposta esperada:
+
+```json
+{
+  "model": "llama3.2:latest",
+  "size_gb": 2.0,
+  "family": "llama",
+  "context_length": 8192,
+  "quantization": "Q4_K_M"
+}
+```
+
+Campos podem vir como `null` quando o dado nao for encontrado.
+
+### 9.5 Enviar mensagem ao chat
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+prompt=Mensagem%20do%20usuario&model=llama3.2:latest
+```
+
+Resposta:
+
+```http
+Content-Type: application/x-ndjson; charset=UTF-8
+```
+
+Linhas possiveis:
+
+```json
+{"type":"chunk","content":"texto parcial"}
+{"type":"meta","context_usage":{"tokens":123,"limit":8000,"percentage":2},"context_trimmed":false}
+{"type":"error","message":"erro amigavel","context_reset":false}
+```
+
+### 9.6 Selecionar persona
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+persona_action=select&persona_id=2
+```
+
+Resposta:
+
+```json
+{
+  "success": true,
+  "persona": {},
+  "personas": [],
+  "context_usage": {}
+}
+```
+
+### 9.7 Criar persona
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+persona_action=create&name=Nome&description=Descricao&prompt_content=Prompt
+```
+
+Cria a persona e a define como ativa no chat atual.
+
+### 9.8 Atualizar persona
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+persona_action=update&persona_id=2&name=Nome&description=Descricao&prompt_content=Prompt
+```
+
+Atualiza a persona. Se ela for a persona ativa do chat atual, o chat passa a usar o prompt atualizado.
+
+### 9.9 Excluir persona
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+persona_action=delete&persona_id=2
+```
+
+Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a persona fallback.
+
+### 9.10 Atualizar system prompt diretamente
+
+```http
+POST /index.php?chat_id=1
+Content-Type: application/x-www-form-urlencoded
+
+system_prompt=Novo%20prompt
+```
+
+Este endpoint ainda existe. No comportamento atual, ele cria uma **Persona personalizada** a partir do prompt informado e associa essa persona ao chat.
+
+## 10. Modelo de dados
+
+### 10.1 Tabela `personas`
+
+```sql
+CREATE TABLE IF NOT EXISTS personas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    prompt_content TEXT NOT NULL,
+    is_public INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+```
+
+Finalidade:
+
+- guardar personas reutilizaveis;
+- diferenciar personas semeadas/publicas de personas criadas pelo usuario;
+- fornecer prompt para o contexto da IA.
+
+### 10.2 Tabela `chats`
+
+```sql
+CREATE TABLE IF NOT EXISTS chats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    model_used TEXT NOT NULL,
+    system_prompt TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    persona_id INTEGER NULL
+)
+```
+
+Finalidade:
+
+- guardar o container da conversa;
+- armazenar titulo;
+- registrar ultimo modelo usado;
+- manter prompt associado ao chat;
+- associar chat a persona.
+
+### 10.3 Tabela `messages`
+
+```sql
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+    content TEXT NOT NULL,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+)
+```
+
+Observacao importante: apesar da tabela aceitar `system`, o repositorio atualmente persiste apenas mensagens `user` e `assistant`. O system prompt fica no chat/persona e e reinjetado ao montar o contexto.
+
+### 10.4 Indices
+
+Indices criados:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id ON messages(chat_id, id);
+CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at);
+CREATE INDEX IF NOT EXISTS idx_chats_persona_id ON chats(persona_id);
+```
+
+## 11. Principais classes e responsabilidades
+
+### `App\Config\AppConfig`
+
+Centraliza configuracoes de ambiente e valores padrao.
+
+### `App\Database\SqliteConnection`
+
+Cria diretorio do banco quando necessario, instancia PDO e ativa foreign keys.
+
+### `App\Database\SqliteMigrator`
+
+Cria tabelas, indices, personas padrao e migra chats antigos para personas.
+
+### `App\Repositories\SqliteConversationRepository`
+
+Responsavel por:
+
+- recuperar mensagens;
+- substituir mensagens;
+- recuperar system prompt;
+- associar prompt/persona ao chat;
+- criar chats;
+- validar existencia de chat;
+- persistir conversa apos interacao;
+- gerar titulo do chat a partir da primeira mensagem do usuario.
+
+### `App\Repositories\SqlitePersonaRepository`
+
+Responsavel por:
+
+- listar personas;
+- buscar persona ativa por chat;
+- selecionar persona;
+- criar persona;
+- atualizar persona;
+- excluir persona;
+- manter cache de persona ativa por sessao.
+
+### `App\Services\OllamaClient`
+
+Responsavel por:
+
+- listar modelos via `/api/tags`;
+- obter tamanho do modelo via `/api/tags`;
+- enviar chat para `/api/chat`;
+- processar streaming retornado pelo Ollama;
+- repassar chunks para callback.
+
+### `App\Services\ContextWindowService`
+
+Responsavel por:
+
+- estimar tokens;
+- calcular uso de contexto;
+- montar array com system prompt;
+- remover mensagens antigas quando o limite e excedido.
+
+### `App\Services\ModelSelector`
+
+Escolhe o modelo padrao com base nos modelos disponiveis e preferencias.
+
+### `App\Services\ModelMetadataService`
+
+Busca, parseia e cacheia metadados de modelos.
+
+### `App\Services\SizeParser`
+
+Converte tamanhos para GB.
+
+### `App\Http\ChatStreamHandler`
+
+Coordena o envio da mensagem ao Ollama.
+
+Responsabilidades:
+
+- validar prompt;
+- validar modelo;
+- montar contexto;
+- iniciar resposta NDJSON;
+- tratar streaming;
+- persistir mensagens;
+- emitir metadados;
+- tratar erros e timeout.
+
+### `App\Http\NdjsonResponse`
+
+Centraliza headers e emissao de linhas NDJSON.
+
+### `App\Support\ErrorMessage`
+
+Transforma erros tecnicos em mensagens mais seguras e detecta erros de contexto.
+
+### `App\Support\IconSvg`
+
+Gera SVGs inline usados no PHP.
+
+## 12. Arquivos JavaScript
+
+### `public/assets/js/app.js`
+
+Arquivo de inicializacao do frontend.
+
+Faz:
+
+- configura `marked`;
+- inicializa barra de contexto;
+- inicializa seletor de modelo;
+- inicializa controles de persona;
+- registra eventos de submit do chat;
+- registra eventos de botoes e modais;
+- controla bloqueio/desbloqueio da UI durante a resposta.
+
+### `public/assets/js/chat-stream.js`
+
+Cuida do contrato de streaming NDJSON.
+
+Faz:
+
+- leitura incremental da resposta;
+- decodificacao UTF-8;
+- processamento de buffer por linhas;
+- parse de JSON;
+- entrega de chunks para a renderizacao.
+
+### `public/assets/js/chat-renderer.js`
+
+Cuida de criar mensagens na tela.
+
+Faz:
+
+- adicionar mensagem de usuario;
+- adicionar mensagem de assistente;
+- criar mensagem temporaria de streaming;
+- rolar a area de mensagens para o fim.
+
+### `public/assets/js/message-ui.js`
+
+Cuida de acoes e renderizacao avancada de mensagens.
+
+Faz:
+
+- atualizar barra de contexto;
+- renderizar Markdown;
+- sanitizar HTML;
+- destacar codigo;
+- normalizar blocos de codigo;
+- copiar resposta;
+- reusar pergunta;
+- exibir tooltips.
+
+### `public/assets/js/model-panel.js`
+
+Cuida do seletor de modelos, modal de metadados e biblioteca de personas.
+
+Faz:
+
+- abrir/fechar menu de modelos;
+- selecionar modelo;
+- carregar metadados;
+- abrir/fechar modal de modelo;
+- abrir/fechar biblioteca de personas;
+- criar/editar/excluir/selecionar persona;
+- sincronizar estado global do frontend.
+
+## 13. Estado global no frontend
+
+`views/chat.php` injeta configuracoes iniciais em `window.OlliverseConfig`:
+
+```js
+window.OlliverseConfig = {
+    initialAssistantMessage,
+    chatId,
+    hasAvailableModels,
+    initialContextUsage,
+    personas,
+    activePersona,
+};
+```
+
+Tambem injeta `window.OlliverseState`:
+
+```js
+window.OlliverseState = {
+    activeTooltipButton: null,
+    modelMetadataCache: new Map(),
+};
+```
+
+Esses objetos funcionam como contrato simples entre PHP renderizado e JavaScript.
+
+## 14. Fluxo completo de uma mensagem
+
+1. Usuario envia o formulario.
+2. `app.js` captura o evento.
+3. A mensagem do usuario aparece imediatamente.
+4. Inputs, modelo, persona e botoes sao desabilitados temporariamente.
+5. O frontend cria uma mensagem do assistente com indicador de digitacao.
+6. `fetch` envia `prompt` e `model`.
+7. `index.php` delega para `ChatStreamHandler`.
+8. O handler recupera system prompt e mensagens persistidas.
+9. A mensagem do usuario e adicionada ao array de contexto.
+10. `ContextWindowService` remove mensagens antigas se passar do limite.
+11. O backend inicia NDJSON.
+12. `OllamaClient` chama `/api/chat` com `stream=true`.
+13. Cada chunk do Ollama vira uma linha NDJSON `type=chunk`.
+14. O frontend le cada linha e atualiza o Markdown progressivamente.
+15. Ao final, o backend salva usuario + assistente no SQLite.
+16. O backend envia `type=meta` com uso de contexto.
+17. O frontend finaliza a mensagem e adiciona botao de copiar.
+18. Inputs sao reabilitados.
+
+## 15. Funcionalidades parcialmente preparadas ou planejadas
+
+As specs em `IA/Specs` indicam evolucoes desejadas.
+
+### Ja implementado a partir das specs
+
+- Separacao inicial entre frontend e backend.
+- Backend modularizado em classes.
+- JavaScript separado por responsabilidade.
+- Persistencia SQLite de chats e mensagens.
+- Tabela de personas.
+- Seletor de personas.
+- CRUD simples de personas.
+- System prompt vindo de persona.
+- Controle de janela de contexto.
+- Streaming consistente em NDJSON.
+
+### Ainda aparece como evolucao futura
+
+- Navegacao/listagem visual de historico de chats.
+- Busca no historico.
+- Full-Text Search com SQLite FTS5.
+- Arquivamento de conversas.
+- Exportacao de chat para JSON ou Markdown.
+- RAG.
+- Metadados de modelos mais ricos.
+- Titulo gerado por IA ou editavel pelo usuario.
+
+## 16. Pontos tecnicos importantes
+
+### 16.1 Sessao ainda existe, mas nao como fonte principal do chat
+
+A regra arquitetural desejada e nao salvar estado principal do chat em sessao.
+
+O codigo atual segue isso para conversas e mensagens, que ficam no SQLite.
+
+A sessao ainda e usada para:
+
+- cache de persona ativa;
+- cache de metadados de modelo;
+- controle natural de sessao PHP.
+
+### 16.2 O system prompt tem duas representacoes
+
+Atualmente o prompt pode estar:
+
+- na tabela `personas`, em `prompt_content`;
+- na tabela `chats`, em `system_prompt`.
+
+Na pratica, quando uma persona esta associada ao chat, o prompt da persona tem prioridade. O campo `system_prompt` do chat funciona como copia/snapshot operacional.
+
+### 16.3 A persistencia da conversa regrava mensagens
+
+Ao final de uma interacao, o repositorio substitui as mensagens do chat pelo conjunto atualizado e aparado.
+
+Isso simplifica a janela deslizante, mas significa que mensagens antigas removidas pelo controle de contexto deixam de existir na tabela `messages` daquele chat.
+
+### 16.4 O titulo do chat e automatico e simples
+
+O titulo e gerado a partir da primeira mensagem de usuario encontrada.
+
+Se passar de 80 caracteres, e encurtado.
+
+Ainda nao existe interface de historico para aproveitar esse titulo.
+
+### 16.5 Metadados dependem do ambiente local
+
+O modal de metadados depende de:
+
+- Ollama acessivel;
+- comando `ollama` disponivel no ambiente do PHP;
+- saida de `ollama show --verbose` em formato reconhecivel pelas regex.
+
+Quando algum campo nao e encontrado, a UI mostra `-`.
+
+## 17. Como executar localmente
+
+Requisitos:
+
+- PHP 8.2 ou superior;
+- extensao PDO SQLite habilitada;
+- extensao cURL habilitada;
+- Ollama rodando;
+- pelo menos um modelo instalado no Ollama.
+
+Exemplo de execucao simples:
+
+```bash
+php -S localhost:8000
+```
+
+Depois acesse:
+
+```text
+http://localhost:8000
+```
+
+O Ollama deve estar disponivel em:
+
+```text
+http://localhost:11434
+```
+
+ou na URL definida em `OLLAMA_BASE_URL`.
+
+## 18. Arquivo `.env.example`
+
+O projeto possui um `.env.example` com as variaveis esperadas:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+DEFAULT_SYSTEM_PROMPT="Você é um assistente técnico prestativo."
+CONTEXT_TOKEN_LIMIT=8000
+OLLAMA_CONNECT_TIMEOUT=10
+OLLAMA_RESPONSE_TIMEOUT=180
+MODEL_METADATA_CACHE_TTL=3600
+```
+
+Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carrega automaticamente um arquivo `.env`.
+
+## 19. Checklist funcional do estado atual
+
+- [x] Carrega interface principal do chat.
+- [x] Cria chat automaticamente quando nao existe `chat_id`.
+- [x] Cria nova conversa.
+- [x] Lista modelos locais do Ollama.
+- [x] Seleciona modelo para a proxima mensagem.
+- [x] Mostra metadados do modelo.
+- [x] Envia prompt para Ollama.
+- [x] Recebe resposta em streaming.
+- [x] Renderiza Markdown.
+- [x] Destaca blocos de codigo.
+- [x] Sanitiza HTML renderizado.
+- [x] Persiste mensagens no SQLite.
+- [x] Calcula uso estimado de contexto.
+- [x] Remove mensagens antigas quando excede limite.
+- [x] Reseta contexto em erro especifico de janela do Ollama.
+- [x] Lista personas.
+- [x] Seleciona persona por chat.
+- [x] Cria persona.
+- [x] Edita persona.
+- [x] Exclui persona, com protecao para fallback.
+- [x] Exibe toast de troca de persona.
+- [x] Copia resposta do assistente.
+- [x] Reusa pergunta do usuario.
+- [x] Possui layout responsivo basico.
+
+## 20. Resumo executivo
+
+O Olliverse, no estado atual, e um cliente local de IA para Ollama com base solida para evoluir para uma ferramenta pessoal mais completa.
+
+O projeto ja deixou de ser apenas um `index.php` com chat simples. Hoje ele tem:
+
+- arquitetura PHP modular;
+- persistencia SQLite;
+- controle de contexto;
+- streaming robusto;
+- frontend separado por responsabilidade;
+- personas como camada de comportamento;
+- contratos claros entre backend e frontend.
+
+O proximo salto natural e criar uma experiencia de historico: listagem de chats, busca, arquivamento e exportacao. Essa etapa aproveitaria diretamente as tabelas e titulos que ja existem no banco.
