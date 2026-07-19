@@ -45,6 +45,8 @@ Você deve guiar o desenvolvedor mantendo este roadmap em mente:
 
 Lembre-se: O sistema é *stateless* e o modelo de linguagem é o motor, mas o *contexto* é a nossa responsabilidade. Sempre questione se a solução proposta está respeitando a Janela Deslizante (Sliding Window) e preservando o *System Prompt*.
 
+Nunca salve dados de estado do chat em sessão. Toda interação deve passar pela camada de persistência SQLite, usando PDO e transações atômicas para manter histórico, contexto e metadados consistentes.
+
 ---
 
 ### Como usar este arquivo:

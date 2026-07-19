@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use App\Config\AppConfig;
 use App\Http\ChatStreamHandler;
-use App\Repositories\SessionConversationRepository;
+use App\Repositories\SqliteConversationRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
@@ -19,12 +19,10 @@ $config = $app['config'];
 $ollamaClient = $app['ollama_client'];
 /** @var ContextWindowService $contextWindowService */
 $contextWindowService = $app['context_window'];
-/** @var SessionConversationRepository $conversationRepository */
-$conversationRepository = $app['conversation_repository'];
 /** @var ModelMetadataService $modelMetadataService */
 $modelMetadataService = $app['model_metadata_service'];
-/** @var ChatStreamHandler $chatStreamHandler */
-$chatStreamHandler = $app['chat_stream_handler'];
+/** @var \PDO $pdo */
+$pdo = $app['pdo'];
 
 $availableModels = $ollamaClient->listModels();
 $defaultModel = ModelSelector::defaultModel($availableModels, $config->preferredModels);
@@ -46,16 +44,40 @@ if (($_GET['action'] ?? '') === 'model_metadata') {
     exit;
 }
 
-if (isset($_GET['clear']) && $_GET['clear'] === '1') {
-    $conversationRepository->clear();
+if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
+    $currentChatId = (int) ($_GET['chat_id'] ?? 0);
+    $systemPromptForNewChat = SqliteConversationRepository::systemPromptForChat($pdo, $currentChatId)
+        ?? $config->defaultSystemPrompt;
 
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?'));
-        exit;
-    }
+    redirectToChat(SqliteConversationRepository::createChat(
+        $pdo,
+        $defaultModel,
+        $systemPromptForNewChat
+    ));
 }
 
-$conversationRepository->ensureMessages();
+$chatId = (int) ($_GET['chat_id'] ?? 0);
+
+if ($chatId <= 0 || !SqliteConversationRepository::exists($pdo, $chatId)) {
+    redirectToChat(SqliteConversationRepository::createChat(
+        $pdo,
+        $defaultModel,
+        $config->defaultSystemPrompt
+    ));
+}
+
+$conversationRepository = new SqliteConversationRepository(
+    $pdo,
+    $contextWindowService,
+    $chatId,
+    $defaultModel
+);
+$chatStreamHandler = new ChatStreamHandler(
+    $config,
+    $ollamaClient,
+    $conversationRepository,
+    $contextWindowService
+);
 $systemPrompt = $conversationRepository->systemPrompt($config->defaultSystemPrompt);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_prompt'])) {
@@ -81,9 +103,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {
 }
 
 $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja processar ou refatorar hoje?';
+$initialMessages = $conversationRepository->messages();
 $initialContextUsage = $contextWindowService->usage(
-    $contextWindowService->withSystemPrompt($systemPrompt, $conversationRepository->messages())
+    $contextWindowService->withSystemPrompt($systemPrompt, $initialMessages)
 );
+
+function redirectToChat(int $chatId): never
+{
+    $baseUri = strtok($_SERVER['REQUEST_URI'], '?') ?: '/';
+
+    header('Location: ' . $baseUri . '?chat_id=' . $chatId);
+    exit;
+}
 
 function iconeEnviar(): string
 {

@@ -85,7 +85,14 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
 });
 
 document.getElementById('newChatBtn').addEventListener('click', function() {
-    window.location.href = '?clear=1';
+    const chatId = window.OlliverseConfig.chatId;
+    const searchParams = new URLSearchParams({ new: '1' });
+
+    if (chatId) {
+        searchParams.set('chat_id', chatId);
+    }
+
+    window.location.href = `${window.location.pathname}?${searchParams.toString()}`;
 });
 
 document.getElementById('modelInfoBtn').addEventListener('click', openModelInfoModal);

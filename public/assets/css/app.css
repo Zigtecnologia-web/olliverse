@@ -327,6 +327,7 @@ body {
 .message-group.user {
     align-items: flex-end;
     align-self: flex-end;
+    max-width: min(72%, 680px);
 }
 
 .message-group.assistant {
@@ -354,6 +355,9 @@ body {
     color: #0a0a0c;
     align-self: flex-end;
     border-bottom-right-radius: 2px;
+    padding: 9px 12px;
+    line-height: 1.4;
+    white-space: normal;
 }
 
 .message.user .message-text {
@@ -860,5 +864,9 @@ body {
 
     .model-field {
         width: 100%;
+    }
+
+    .message-group.user {
+        max-width: 88%;
     }
 }

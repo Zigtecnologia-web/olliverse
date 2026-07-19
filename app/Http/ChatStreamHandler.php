@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http;
 
 use App\Config\AppConfig;
-use App\Repositories\SessionConversationRepository;
+use App\Contracts\ConversationRepository;
 use App\Services\ContextWindowService;
 use App\Services\OllamaClient;
 use App\Services\OllamaStreamException;
@@ -17,7 +17,7 @@ final readonly class ChatStreamHandler
     public function __construct(
         private AppConfig $config,
         private OllamaClient $ollamaClient,
-        private SessionConversationRepository $conversationRepository,
+        private ConversationRepository $conversationRepository,
         private ContextWindowService $contextWindowService,
     ) {
     }
@@ -110,7 +110,11 @@ final readonly class ChatStreamHandler
             ];
 
             $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $systemPrompt) || $contextWasTrimmed;
-            $this->conversationRepository->replaceMessages($conversationMessages);
+            $contextWasTrimmed = $this->conversationRepository->replaceConversation(
+                $conversationMessages,
+                $systemPrompt,
+                $selectedModel
+            ) || $contextWasTrimmed;
 
             NdjsonResponse::emit([
                 'type' => 'meta',

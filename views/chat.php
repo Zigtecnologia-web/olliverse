@@ -42,7 +42,24 @@
     </div>
 
     <div class="chat-messages" id="chatMessages">
-        <div class="message assistant"><?php echo htmlspecialchars($initialAssistantMessage, ENT_QUOTES, 'UTF-8'); ?></div>
+    <?php if ($initialMessages === []): ?>
+        <div class="message-group assistant">
+            <div class="message assistant"><?php echo htmlspecialchars($initialAssistantMessage, ENT_QUOTES, 'UTF-8'); ?></div>
+        </div>
+    <?php else: ?>
+        <?php foreach ($initialMessages as $message): ?>
+            <?php $role = $message['role'] === 'user' ? 'user' : 'assistant'; ?>
+            <div class="message-group <?php echo $role; ?>">
+                <div class="message <?php echo $role; ?>">
+                    <?php if ($role === 'user'): ?>
+                        <span class="message-text"><?php echo htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php else: ?>
+                        <?php echo nl2br(htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8')); ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
     </div>
 
     <div class="chat-input-area">
@@ -110,7 +127,7 @@
                 </div>
                 <div class="skill-field">
                     <label for="systemPromptInput">System prompt</label>
-                    <textarea id="systemPromptInput" class="skill-textarea" name="system_prompt"><?php echo htmlspecialchars($_SESSION['system_prompt'], ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    <textarea id="systemPromptInput" class="skill-textarea" name="system_prompt"><?php echo htmlspecialchars($systemPrompt, ENT_QUOTES, 'UTF-8'); ?></textarea>
                 </div>
                 <div id="skillStatus" class="skill-status" aria-live="polite"></div>
             </div>
@@ -127,6 +144,7 @@
 <script>
     window.OlliverseConfig = {
         initialAssistantMessage: <?php echo json_encode($initialAssistantMessage, JSON_UNESCAPED_UNICODE); ?>,
+        chatId: <?php echo json_encode($chatId, JSON_UNESCAPED_UNICODE); ?>,
         hasAvailableModels: <?php echo json_encode((bool) $availableModels); ?>,
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
         skillPresets: {

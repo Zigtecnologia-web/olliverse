@@ -16,6 +16,7 @@ final readonly class AppConfig
         public int $ollamaConnectTimeout,
         public int $ollamaResponseTimeout,
         public int $modelMetadataCacheTtl,
+        public string $sqliteDatabasePath,
         public array $preferredModels,
     ) {
     }
@@ -29,6 +30,7 @@ final readonly class AppConfig
             (int) self::env('OLLAMA_CONNECT_TIMEOUT', '10'),
             (int) self::env('OLLAMA_RESPONSE_TIMEOUT', '180'),
             (int) self::env('MODEL_METADATA_CACHE_TTL', '3600'),
+            self::env('SQLITE_DATABASE_PATH', dirname(__DIR__, 2) . '/storage/database.sqlite'),
             ['llama3.2:latest', 'llama3.2', 'qwen2.5:0.5b'],
         );
     }

@@ -3,13 +3,11 @@
 declare(strict_types=1);
 
 use App\Config\AppConfig;
-use App\Http\ChatStreamHandler;
-use App\Repositories\SessionConversationRepository;
+use App\Database\SqliteConnection;
+use App\Database\SqliteMigrator;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\OllamaClient;
-
-session_start();
 
 spl_autoload_register(static function (string $class): void {
     $prefix = 'App\\';
@@ -32,7 +30,8 @@ $ollamaClient = new OllamaClient(
     $config->ollamaResponseTimeout
 );
 $contextWindowService = new ContextWindowService($config->contextTokenLimit);
-$conversationRepository = new SessionConversationRepository();
+$pdo = (new SqliteConnection($config->sqliteDatabasePath))->pdo();
+(new SqliteMigrator($pdo))->migrate();
 $modelMetadataService = new ModelMetadataService(
     $ollamaClient,
     $config->modelMetadataCacheTtl
@@ -42,12 +41,6 @@ return [
     'config' => $config,
     'ollama_client' => $ollamaClient,
     'context_window' => $contextWindowService,
-    'conversation_repository' => $conversationRepository,
+    'pdo' => $pdo,
     'model_metadata_service' => $modelMetadataService,
-    'chat_stream_handler' => new ChatStreamHandler(
-        $config,
-        $ollamaClient,
-        $conversationRepository,
-        $contextWindowService
-    ),
 ];
