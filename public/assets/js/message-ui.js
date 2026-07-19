@@ -23,15 +23,29 @@ function renderAssistantMessageContent(messageDiv, text) {
 
     try {
         messageDiv.innerHTML = DOMPurify.sanitize(marked.parse(normalizedText));
-
-        if (window.hljs) {
-            messageDiv.querySelectorAll('pre code').forEach((block) => {
-                hljs.highlightElement(block);
-            });
-        }
+        enhanceCodeBlocks(messageDiv);
     } catch (error) {
         messageDiv.textContent = normalizedText;
     }
+}
+
+function renderPersistedAssistantMessages() {
+    document.querySelectorAll('.assistant-markdown-source[data-markdown-source]').forEach((source) => {
+        const messageDiv = source.closest('.message.assistant');
+
+        if (!messageDiv) {
+            return;
+        }
+
+        try {
+            const text = JSON.parse(source.dataset.markdownSource || '""');
+
+            renderAssistantMessageContent(messageDiv, text);
+            appendCopyResponseButton(messageDiv.closest('.message-group'), text);
+        } catch (error) {
+            console.error('Erro ao renderizar mensagem persistida:', error);
+        }
+    });
 }
 
 function finalizeStreamingAssistantMessage(assistantMessage, text) {
@@ -95,12 +109,7 @@ function renderAssistantMessage(messageGroup, messageDiv, text) {
 
     try {
         messageDiv.innerHTML = DOMPurify.sanitize(marked.parse(normalizedText));
-
-        if (window.hljs) {
-            messageDiv.querySelectorAll('pre code').forEach((block) => {
-                hljs.highlightElement(block);
-            });
-        }
+        enhanceCodeBlocks(messageDiv);
 
         appendCopyResponseButton(messageGroup, text);
     } catch (error) {
@@ -108,6 +117,80 @@ function renderAssistantMessage(messageGroup, messageDiv, text) {
         renderBasicMarkdown(messageDiv, normalizedText);
         appendCopyResponseButton(messageGroup, text);
     }
+}
+
+function enhanceCodeBlocks(messageDiv) {
+    messageDiv.querySelectorAll('pre code').forEach((block) => {
+        const pre = block.parentElement;
+
+        if (!pre || pre.parentElement?.classList.contains('code-block')) {
+            return;
+        }
+
+        highlightCodeBlock(block);
+
+        decorateCodeBlock(pre, block);
+    });
+}
+
+function highlightCodeBlock(block) {
+    const language = detectCodeLanguage(block);
+    const originalCode = block.textContent || '';
+
+    if (block.dataset.highlighted) {
+        return;
+    }
+
+    if (!window.hljs) {
+        block.innerHTML = applyBasicHighlight(originalCode, language);
+        return;
+    }
+
+    try {
+        hljs.highlightElement(block);
+    } catch (error) {
+        console.error('Erro ao aplicar syntax highlighting:', error);
+        block.innerHTML = applyBasicHighlight(originalCode, language);
+    }
+}
+
+function decorateCodeBlock(pre, block) {
+    const wrapper = document.createElement('div');
+    const header = document.createElement('div');
+    const languageLabel = document.createElement('span');
+    const copyButton = document.createElement('button');
+    const language = detectCodeLanguage(block);
+    const codeText = block.textContent || '';
+
+    wrapper.className = 'code-block';
+    header.className = 'code-block-header';
+    languageLabel.className = 'code-block-language';
+    languageLabel.textContent = language;
+
+    copyButton.type = 'button';
+    copyButton.className = 'code-copy-btn';
+    copyButton.setAttribute('aria-label', 'Copiar código');
+    copyButton.setAttribute('data-tooltip', 'Copiar código');
+    copyButton.innerHTML = iconSvg('copy');
+    copyButton.addEventListener('click', function() {
+        copyCodeBlockText(codeText, copyButton);
+    });
+    attachActionTooltip(copyButton);
+
+    header.appendChild(languageLabel);
+    header.appendChild(copyButton);
+    pre.replaceWith(wrapper);
+    wrapper.appendChild(header);
+    wrapper.appendChild(pre);
+}
+
+function detectCodeLanguage(block) {
+    const languageClass = Array.from(block.classList).find((className) => {
+        return className.startsWith('language-');
+    });
+    const language = languageClass ? languageClass.replace('language-', '') : '';
+
+    return language || 'plaintext';
 }
 
 function appendCopyResponseButton(messageGroup, text) {
@@ -193,10 +276,19 @@ function positionFloatingTooltip(button, tooltip) {
 
 function copyResponseText(text, copyButton) {
     copyText(text).then(() => {
-        showCopyFeedback(copyButton, true);
+        showCopyFeedback(copyButton, true, 'Resposta copiada', 'Copiar resposta');
     }).catch((error) => {
         console.error('Erro ao copiar resposta:', error);
-        showCopyFeedback(copyButton, false);
+        showCopyFeedback(copyButton, false, 'Não foi possível copiar', 'Copiar resposta');
+    });
+}
+
+function copyCodeBlockText(text, copyButton) {
+    copyText(text).then(() => {
+        showCopyFeedback(copyButton, true, 'Código copiado', 'Copiar código');
+    }).catch((error) => {
+        console.error('Erro ao copiar código:', error);
+        showCopyFeedback(copyButton, false, 'Não foi possível copiar', 'Copiar código');
     });
 }
 
@@ -226,9 +318,9 @@ function copyText(text) {
     });
 }
 
-function showCopyFeedback(copyButton, success) {
+function showCopyFeedback(copyButton, success, feedbackLabel, defaultLabel) {
     copyButton.classList.toggle('copied', success);
-    const label = success ? 'Resposta copiada' : 'Não foi possível copiar';
+    const label = success ? feedbackLabel : 'Não foi possível copiar';
 
     copyButton.setAttribute('aria-label', label);
     copyButton.setAttribute('data-tooltip', label);
@@ -238,8 +330,8 @@ function showCopyFeedback(copyButton, success) {
 
     window.setTimeout(() => {
         copyButton.classList.remove('copied');
-        copyButton.setAttribute('aria-label', 'Copiar resposta');
-        copyButton.setAttribute('data-tooltip', 'Copiar resposta');
+        copyButton.setAttribute('aria-label', defaultLabel);
+        copyButton.setAttribute('data-tooltip', defaultLabel);
         copyButton.innerHTML = iconSvg('copy');
         refreshFloatingTooltip(copyButton);
     }, 1600);
@@ -265,7 +357,7 @@ function iconSvg(name) {
 }
 
 function normalizeCodeMarkdown(text) {
-    let normalizedText = text
+    let normalizedText = repairMalformedCodeFences(text)
         .replace(/```markdown\s*```(\w+)\s*([\s\S]*?)```\s*```/g, '```$1\n$2\n```')
         .replace(/```markdown\s+```(\w+)\s+([\s\S]*?)```\s*```/g, '```$1\n$2\n```')
         .replace(/```(\w+)\s+([\s\S]*?)```/g, (match, language, code) => {
@@ -282,8 +374,45 @@ function normalizeCodeMarkdown(text) {
     return removePlainCodeBeforeFormattedCode(normalizedText);
 }
 
+function repairMalformedCodeFences(text) {
+    const lines = text.split('\n');
+    const repairedLines = [];
+    let currentFenceLanguage = '';
+    let isInsideFence = false;
+
+    lines.forEach((line) => {
+        const fenceMatch = line.trim().match(/^```([A-Za-z0-9_+#.-]*)\s*$/);
+
+        if (fenceMatch) {
+            if (isInsideFence) {
+                repairedLines.push('```');
+                isInsideFence = false;
+                currentFenceLanguage = '';
+                return;
+            }
+
+            currentFenceLanguage = normalizeLanguageName(fenceMatch[1] || 'plaintext');
+            repairedLines.push(`\`\`\`${currentFenceLanguage}`);
+            isInsideFence = true;
+            return;
+        }
+
+        if (isInsideFence && line.trim().toLowerCase() === currentFenceLanguage) {
+            return;
+        }
+
+        repairedLines.push(line);
+    });
+
+    if (isInsideFence) {
+        repairedLines.push('```');
+    }
+
+    return repairedLines.join('\n');
+}
+
 function fenceBareCodeBlocks(text) {
-    return text
+    const fencedText = text
         .replace(/(^|\n)(<\?php[\s\S]*?)(?=\n(?:Aqui está|Esta função|Esse código|Explicação|Observação)\b|$)/g, (match, prefix, code) => {
             if (match.includes('```')) return match;
             return `${prefix}\`\`\`php\n${code.trim()}\n\`\`\``;
@@ -292,6 +421,108 @@ function fenceBareCodeBlocks(text) {
             if (match.includes('```')) return match;
             return `${prefix}\`\`\`javascript\n${code.trim()}\n\`\`\``;
         });
+
+    return fenceLooseCodeLines(fencedText);
+}
+
+function fenceLooseCodeLines(text) {
+    const lines = text.split('\n');
+    const fencedLines = [];
+    const codeBuffer = [];
+    let isInsideFence = false;
+
+    const flushCodeBuffer = () => {
+        if (codeBuffer.length === 0) {
+            return;
+        }
+
+        const code = codeBuffer.join('\n').trim();
+        const language = detectLooseCodeLanguage(code);
+
+        fencedLines.push(`\`\`\`${language}`);
+        fencedLines.push(code);
+        fencedLines.push('```');
+        codeBuffer.length = 0;
+    };
+
+    lines.forEach((line) => {
+        if (line.trim().startsWith('```')) {
+            flushCodeBuffer();
+            isInsideFence = !isInsideFence;
+            fencedLines.push(line);
+            return;
+        }
+
+        if (!isInsideFence && codeBuffer.length > 0) {
+            if (!line.trim() || isLikelyLooseCodeContinuation(line)) {
+                codeBuffer.push(line);
+                return;
+            }
+
+            flushCodeBuffer();
+        }
+
+        if (!isInsideFence && isLikelyLooseCodeLine(line)) {
+            codeBuffer.push(line);
+            return;
+        }
+
+        flushCodeBuffer();
+        fencedLines.push(line);
+    });
+
+    flushCodeBuffer();
+
+    return fencedLines.join('\n');
+}
+
+function isLikelyLooseCodeLine(line) {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+        return false;
+    }
+
+    return /^(const|let|var|function|class|import|export|require\(|[A-Za-z_$][\w$.]*\(|[A-Za-z_$][\w$.]*\.)/.test(trimmedLine)
+        || /^(return|this\.|await\s+|async\s+)/.test(trimmedLine)
+        || /^[});\]}]+[;,]?$/.test(trimmedLine)
+        || /=>\s*\{?$/.test(trimmedLine);
+}
+
+function isLikelyLooseCodeContinuation(line) {
+    const trimmedLine = line.trim();
+
+    return /^(return|this\.|await\s+|async\s+|[A-Za-z_$][\w$]*:|[A-Za-z_$][\w$.]*\(|[A-Za-z_$][\w$.]*\.|[});\]}]+[;,]?|[{}]);?$/.test(trimmedLine)
+        || (/^\s+/.test(line) && /[{}()[\].,:;'"`?=]/.test(trimmedLine));
+}
+
+function detectLooseCodeLanguage(code) {
+    if (code.includes('<?php')) {
+        return 'php';
+    }
+
+    if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER)\b/im.test(code)) {
+        return 'sql';
+    }
+
+    if (/^\s*[{\[]/.test(code)) {
+        return 'json';
+    }
+
+    return 'javascript';
+}
+
+function normalizeLanguageName(language) {
+    const normalizedLanguage = language.toLowerCase();
+    const aliases = {
+        js: 'javascript',
+        shell: 'bash',
+        sh: 'bash',
+        text: 'plaintext',
+        plain: 'plaintext',
+    };
+
+    return aliases[normalizedLanguage] || normalizedLanguage || 'plaintext';
 }
 
 function removeRepeatedCodeBlocks(text) {
@@ -398,8 +629,9 @@ function applyBasicHighlight(code, language) {
     const keywords = languageKeywords[language] || languageKeywords.javascript;
 
     escapedCode = escapedCode
-        .replace(/('[^'\n]*'|&quot;[^&\n]*(?:&quot;)|`[^`\n]*`)/g, (match) => protectToken(`<span class="code-string">${match}</span>`, protectedTokens))
+        .replace(/(&#039;[^&\n]*(?:&#039;)|&quot;[^&\n]*(?:&quot;)|`[^`\n]*`)/g, (match) => protectToken(`<span class="code-string">${match}</span>`, protectedTokens))
         .replace(/(&lt;!--[\s\S]*?--&gt;|\/\/.*)/g, (match) => protectToken(`<span class="code-comment">${match}</span>`, protectedTokens))
+        .replace(/&(?:amp|lt|gt|quot|#039);/g, (match) => protectToken(match, protectedTokens))
         .replace(/\b(\d+)\b/g, '<span class="code-number">$1</span>')
         .replace(new RegExp(`\\b(${keywords})\\b`, 'g'), '<span class="code-keyword">$1</span>');
 

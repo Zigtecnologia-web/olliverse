@@ -574,9 +574,9 @@ body {
 
 .message.assistant pre {
     background-color: #121214;
-    border: 1px solid #323238;
-    border-radius: 8px;
-    margin: 12px 0;
+    border: 0;
+    border-radius: 0 0 8px 8px;
+    margin: 0;
     overflow-x: auto;
     padding: 14px;
 }
@@ -591,6 +591,65 @@ body {
     line-height: 1.6;
     padding: 0;
     white-space: pre;
+}
+
+.code-block {
+    background-color: #121214;
+    border: 1px solid #323238;
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+}
+
+.code-block:last-child {
+    margin-bottom: 0;
+}
+
+.code-block-header {
+    align-items: center;
+    background-color: #202027;
+    border-bottom: 1px solid #323238;
+    display: flex;
+    justify-content: space-between;
+    min-height: 34px;
+    padding: 6px 8px 6px 12px;
+}
+
+.code-block-language {
+    color: #a8a8b3;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.code-copy-btn {
+    align-items: center;
+    background-color: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #a8a8b3;
+    cursor: pointer;
+    display: inline-flex;
+    height: 28px;
+    justify-content: center;
+    position: relative;
+    transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+    width: 28px;
+}
+
+.code-copy-btn:hover,
+.code-copy-btn:focus,
+.code-copy-btn.copied {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: #04d361;
+    color: #04d361;
+    outline: none;
+}
+
+.code-copy-btn svg {
+    height: 15px;
+    width: 15px;
 }
 
 .message.assistant a {
@@ -612,6 +671,38 @@ body {
 
 .code-number {
     color: #79c0ff;
+}
+
+.message.assistant .hljs-keyword,
+.message.assistant .hljs-built_in,
+.message.assistant .hljs-type,
+.message.assistant .hljs-literal {
+    color: #ff7b72;
+}
+
+.message.assistant .hljs-string,
+.message.assistant .hljs-regexp,
+.message.assistant .hljs-symbol {
+    color: #a5d6ff;
+}
+
+.message.assistant .hljs-comment,
+.message.assistant .hljs-quote {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.message.assistant .hljs-number,
+.message.assistant .hljs-variable,
+.message.assistant .hljs-attr,
+.message.assistant .hljs-attribute {
+    color: #79c0ff;
+}
+
+.message.assistant .hljs-title,
+.message.assistant .hljs-function,
+.message.assistant .hljs-name {
+    color: #d2a8ff;
 }
 
 .chat-input-area {

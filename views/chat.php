@@ -66,7 +66,9 @@
                     <?php if ($role === 'user'): ?>
                         <span class="message-text"><?php echo htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php else: ?>
-                        <?php echo nl2br(htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8')); ?>
+                        <div class="assistant-markdown-source" data-markdown-source="<?php echo htmlspecialchars(json_encode($message['content'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo nl2br(htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8')); ?>
+                        </div>
                     <?php endif; ?>
                 </div>
             </div>

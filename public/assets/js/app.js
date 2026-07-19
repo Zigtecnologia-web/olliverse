@@ -5,6 +5,7 @@ const {
 } = window.OlliverseConfig;
 marked.setOptions({ breaks: true });
 updateContextUsage(initialContextUsage);
+renderPersistedAssistantMessages();
 initModelPicker();
 initPersonaControls();
 
