@@ -1,7 +1,8 @@
 # Olliverse - Documentacao funcional e tecnica
 
-**Criado por:** Valdiney França  
-**Data de criacao:** 19 de julho de 2026
+- **Criado por:** Valdiney França
+- **Data de criacao:** 19 de julho de 2026
+- **Ultima atualizacao:** 20 de julho de 2026
 
 ## 1. Visao geral
 
@@ -66,6 +67,7 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 
 - Ollama.
 - Endpoint principal usado: `/api/chat`.
+- Endpoint de geracao rapida de texto usado: `/api/generate`.
 - Endpoint de listagem de modelos: `/api/tags`.
 - Comando local usado para metadados: `ollama show --verbose`.
 
@@ -127,6 +129,7 @@ Ele faz:
 - conexao com SQLite;
 - execucao das migracoes;
 - criacao do servico de metadados de modelos.
+- criacao do servico gerador de prompts de personas.
 
 O retorno do bootstrap e um array simples de dependencias:
 
@@ -137,6 +140,7 @@ O retorno do bootstrap e um array simples de dependencias:
     'context_window' => $contextWindowService,
     'pdo' => $pdo,
     'model_metadata_service' => $modelMetadataService,
+    'prompt_generator_service' => $promptGeneratorService,
 ]
 ```
 
@@ -297,8 +301,24 @@ A UI possui:
 - botao de configuracao;
 - modal **Biblioteca de Personas**;
 - campos de nome, descricao e system prompt;
+- placeholders nos campos de nome, descricao e system prompt para orientar o preenchimento;
+- botao **Gerar** ao lado do rotulo de system prompt;
 - acoes para criar, editar e excluir personas;
+- tooltips nos botoes de informacoes do modelo, biblioteca de personas e geracao de prompt;
 - toast visual indicando troca de persona.
+
+O botao **Gerar** usa IA para transformar `Nome` e `Descricao` em um system prompt estruturado em YAML.
+
+Regras desse fluxo:
+
+- o botao fica desabilitado por padrao;
+- o botao so e habilitado quando `Nome` e `Descricao` contem texto;
+- durante a requisicao, o texto muda para `Gerando...` e o botao fica bloqueado;
+- o backend valida novamente nome, descricao e modelo;
+- a resposta gerada e injetada no campo `System prompt`;
+- a persona so e persistida quando o usuario clica em **Salvar Persona**.
+
+O tooltip do botao **Gerar** reutiliza o tooltip flutuante de `message-ui.js`, renderizado no `document.body`, para nao ficar preso atras da modal.
 
 Personas padrao semeadas automaticamente:
 
@@ -715,7 +735,43 @@ persona_action=delete&persona_id=2
 
 Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a persona fallback.
 
-### 9.10 Atualizar system prompt diretamente
+### 9.10 Gerar system prompt de persona com IA
+
+```http
+POST /index.php?chat_id=1&action=prompt_generate
+Content-Type: application/x-www-form-urlencoded
+
+name=Analista%20de%20Codigo&description=Revisa%20codigo%20PHP%20com%20foco%20em%20clareza&model=llama3.2:latest
+```
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "prompt_content": "name: Analista de Codigo\nrole: ...\npersona_traits:\n  - ...\nskills:\n  - ...\ndirectives:\n  - ..."
+}
+```
+
+Esse endpoint:
+
+- valida se o modelo informado existe na lista local do Ollama;
+- exige `name` e `description`;
+- monta um meta-prompt no backend;
+- chama `/api/generate` do Ollama com `stream=false`;
+- extrai o bloco YAML da resposta;
+- valida se o YAML possui `name`, `role`, `persona_traits`, `skills` e `directives`.
+
+Erros retornam JSON com status `422`:
+
+```json
+{
+  "success": false,
+  "error": "Informe nome e descrição antes de gerar o prompt."
+}
+```
+
+### 9.11 Atualizar system prompt diretamente
 
 ```http
 POST /index.php?chat_id=1
@@ -841,9 +897,22 @@ Responsavel por:
 
 - listar modelos via `/api/tags`;
 - obter tamanho do modelo via `/api/tags`;
+- gerar texto rapido via `/api/generate`;
 - enviar chat para `/api/chat`;
 - processar streaming retornado pelo Ollama;
 - repassar chunks para callback.
+
+### `App\Services\PromptGeneratorService`
+
+Responsavel por gerar system prompts de personas a partir de nome e descricao.
+
+Faz:
+
+- validar entrada obrigatoria;
+- montar o meta-prompt de engenharia de prompts;
+- chamar `OllamaClient::generate()`;
+- extrair YAML puro da resposta, incluindo respostas envolvidas em code fence;
+- validar as chaves obrigatorias `name`, `role`, `persona_traits`, `skills` e `directives`.
 
 ### `App\Services\ContextWindowService`
 
@@ -907,6 +976,8 @@ Faz:
 - inicializa controles de persona;
 - registra eventos de submit do chat;
 - registra eventos de botoes e modais;
+- registra o botao de geracao de prompt de persona;
+- liga o tooltip flutuante ao botao **Gerar**;
 - controla bloqueio/desbloqueio da UI durante a resposta.
 
 ### `public/assets/js/chat-stream.js`
@@ -959,6 +1030,9 @@ Faz:
 - abrir/fechar modal de modelo;
 - abrir/fechar biblioteca de personas;
 - criar/editar/excluir/selecionar persona;
+- habilitar/desabilitar o botao **Gerar** conforme nome e descricao;
+- chamar `?action=prompt_generate`;
+- injetar o YAML gerado no campo `System prompt`;
 - sincronizar estado global do frontend.
 
 ## 13. Estado global no frontend
@@ -1022,6 +1096,7 @@ As specs em `IA/Specs` indicam evolucoes desejadas.
 - Seletor de personas.
 - CRUD simples de personas.
 - System prompt vindo de persona.
+- Geracao de system prompt em YAML para personas usando `/api/generate`.
 - Controle de janela de contexto.
 - Streaming consistente em NDJSON.
 - RAG local com ingestao de documentos de texto e busca por similaridade.
@@ -1151,6 +1226,7 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Cria persona.
 - [x] Edita persona.
 - [x] Exclui persona, com protecao para fallback.
+- [x] Gera system prompt YAML para persona a partir de nome e descricao.
 - [x] Exibe toast de troca de persona.
 - [x] Copia resposta do assistente.
 - [x] Reusa pergunta do usuario.
