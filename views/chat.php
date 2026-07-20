@@ -33,7 +33,7 @@
                         <?php endif; ?>
                         </div>
                     </div>
-                    <button type="button" id="modelInfoBtn" class="model-info-btn" aria-label="Informações do modelo" title="Informações do modelo" <?php echo $availableModels ? '' : 'disabled'; ?>><?php echo iconSvg('info'); ?></button>
+                    <button type="button" id="modelInfoBtn" class="model-info-btn" aria-label="Informações do modelo" title="Informações do modelo" data-tooltip="Informações do modelo" <?php echo $availableModels ? '' : 'disabled'; ?>><?php echo iconSvg('info'); ?></button>
                 </div>
                 <div class="persona-field">
                     <label for="personaSelect">Persona</label>
@@ -48,7 +48,7 @@
             </div>
         </div>
         <div class="header-actions">
-            <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
+            <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
             <button type="button" id="newChatBtn" class="new-chat-btn">+ Nova conversa</button>
         </div>
     </div>
@@ -157,15 +157,21 @@
                 </div>
                 <div class="skill-field">
                     <label for="personaNameInput">Nome</label>
-                    <input type="text" id="personaNameInput" class="skill-input" name="name" required>
+                    <input type="text" id="personaNameInput" class="skill-input" name="name" placeholder="Ex.: Analista de Código" required>
                 </div>
                 <div class="skill-field">
                     <label for="personaDescriptionInput">Descrição</label>
-                    <input type="text" id="personaDescriptionInput" class="skill-input" name="description">
+                    <input type="text" id="personaDescriptionInput" class="skill-input" name="description" placeholder="Descreva o comportamento e objetivo da persona">
                 </div>
                 <div class="skill-field">
-                    <label for="systemPromptInput">System prompt</label>
-                    <textarea id="systemPromptInput" class="skill-textarea" name="prompt_content"><?php echo htmlspecialchars($systemPrompt, ENT_QUOTES, 'UTF-8'); ?></textarea>
+                    <div class="skill-field-header">
+                        <label for="systemPromptInput">System prompt</label>
+                        <button type="button" id="generatePromptBtn" class="generate-prompt-btn" aria-label="Gerar prompt com IA" title="Gerar prompt com IA" data-tooltip="Gerar prompt com IA" disabled>
+                            <?php echo iconSvg('sparkles'); ?>
+                            <span>Gerar</span>
+                        </button>
+                    </div>
+                    <textarea id="systemPromptInput" class="skill-textarea" name="prompt_content" placeholder="O prompt em YAML será gerado aqui, ou escreva o seu manualmente"><?php echo htmlspecialchars($systemPrompt, ENT_QUOTES, 'UTF-8'); ?></textarea>
                 </div>
                 <div id="skillStatus" class="skill-status" aria-live="polite"></div>
             </div>

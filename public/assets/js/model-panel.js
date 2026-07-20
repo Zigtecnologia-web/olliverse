@@ -168,6 +168,7 @@ function openSkillModal() {
     document.getElementById('skillStatus').textContent = '';
     renderPersonaLibraryOptions();
     fillPersonaForm(Number(window.OlliverseConfig.activePersona.id));
+    updateGeneratePromptButton();
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
     document.getElementById('personaNameInput').focus();
@@ -371,6 +372,7 @@ function fillPersonaForm(personaId) {
     document.getElementById('systemPromptInput').value = persona.prompt_content || '';
     document.getElementById('deletePersonaBtn').disabled = Number(persona.id) === Number(window.OlliverseConfig.activePersona.id)
         && window.OlliverseConfig.personas.length <= 1;
+    updateGeneratePromptButton();
 }
 
 function startNewPersona() {
@@ -383,7 +385,71 @@ function startNewPersona() {
     document.getElementById('systemPromptInput').value = '';
     document.getElementById('deletePersonaBtn').disabled = true;
     document.getElementById('skillStatus').textContent = '';
+    updateGeneratePromptButton();
     document.getElementById('personaNameInput').focus();
+}
+
+function updateGeneratePromptButton() {
+    const button = document.getElementById('generatePromptBtn');
+    const nameValue = document.getElementById('personaNameInput').value.trim();
+    const descriptionValue = document.getElementById('personaDescriptionInput').value.trim();
+    const isGenerating = button.dataset.loading === '1';
+
+    button.disabled = isGenerating || !window.OlliverseConfig.hasAvailableModels || nameValue === '' || descriptionValue === '';
+}
+
+function generatePersonaPrompt() {
+    const button = document.getElementById('generatePromptBtn');
+    const statusEl = document.getElementById('skillStatus');
+    const nameValue = document.getElementById('personaNameInput').value.trim();
+    const descriptionValue = document.getElementById('personaDescriptionInput').value.trim();
+    const model = document.getElementById('modelSelect').value;
+    const promptInput = document.getElementById('systemPromptInput');
+    const url = new URL(window.location.href);
+
+    if (button.disabled || !nameValue || !descriptionValue) {
+        return;
+    }
+
+    url.searchParams.set('action', 'prompt_generate');
+    button.dataset.loading = '1';
+    button.querySelector('span').textContent = 'Gerando...';
+    statusEl.classList.remove('error');
+    statusEl.textContent = 'Gerando prompt...';
+    updateGeneratePromptButton();
+
+    fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            name: nameValue,
+            description: descriptionValue,
+            model,
+        }).toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Erro ao gerar prompt.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        promptInput.value = payload.prompt_content || '';
+        statusEl.textContent = 'Prompt gerado.';
+        promptInput.focus();
+    })
+    .catch((error) => {
+        statusEl.classList.add('error');
+        statusEl.textContent = error.message || 'Erro ao gerar prompt.';
+    })
+    .finally(() => {
+        button.dataset.loading = '0';
+        button.querySelector('span').textContent = 'Gerar';
+        updateGeneratePromptButton();
+    });
 }
 
 function findPersona(personaId) {

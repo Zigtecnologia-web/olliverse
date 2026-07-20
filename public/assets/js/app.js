@@ -155,6 +155,11 @@ document.getElementById('personaLibrarySelect').addEventListener('change', funct
 });
 document.getElementById('newPersonaBtn').addEventListener('click', startNewPersona);
 document.getElementById('deletePersonaBtn').addEventListener('click', deleteSelectedPersona);
+const generatePromptBtn = document.getElementById('generatePromptBtn');
+generatePromptBtn.addEventListener('click', generatePersonaPrompt);
+attachActionTooltip(generatePromptBtn);
+document.getElementById('personaNameInput').addEventListener('input', updateGeneratePromptButton);
+document.getElementById('personaDescriptionInput').addEventListener('input', updateGeneratePromptButton);
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape' && document.getElementById('skillModal').classList.contains('open')) {
         closeSkillModal();

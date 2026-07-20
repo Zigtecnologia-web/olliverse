@@ -87,6 +87,23 @@ final readonly class OllamaClient
         return array_map(static fn (mixed $value): float => (float) $value, $embedding);
     }
 
+    public function generate(string $modelName, string $prompt): string
+    {
+        $result = $this->postJson('/api/generate', [
+            'model' => $modelName,
+            'prompt' => $prompt,
+            'stream' => false,
+        ], $this->responseTimeout);
+
+        $response = $result['response'] ?? '';
+
+        if (!is_string($response) || trim($response) === '') {
+            throw new \RuntimeException('Ollama retornou uma resposta vazia.');
+        }
+
+        return $response;
+    }
+
     /**
      * @param array<string, mixed> $payload
      * @param callable(array<string, mixed>): void $onPayload

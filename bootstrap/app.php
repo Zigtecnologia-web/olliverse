@@ -9,6 +9,7 @@ use App\Repositories\SqliteDocumentChunkRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\OllamaClient;
+use App\Services\PromptGeneratorService;
 use App\Services\RagChunkerService;
 use App\Services\RagIngestionService;
 use App\Services\RagRetrievalService;
@@ -47,6 +48,7 @@ $modelMetadataService = new ModelMetadataService(
     $ollamaClient,
     $config->modelMetadataCacheTtl
 );
+$promptGeneratorService = new PromptGeneratorService($ollamaClient);
 $ragIngestionService = new RagIngestionService(
     $documentChunkRepository,
     new RagChunkerService(),
@@ -66,6 +68,7 @@ return [
     'context_window' => $contextWindowService,
     'pdo' => $pdo,
     'model_metadata_service' => $modelMetadataService,
+    'prompt_generator_service' => $promptGeneratorService,
     'document_chunk_repository' => $documentChunkRepository,
     'rag_ingestion_service' => $ragIngestionService,
     'rag_retrieval_service' => $ragRetrievalService,

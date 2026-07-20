@@ -11,6 +11,7 @@ use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
 use App\Services\OllamaClient;
+use App\Services\PromptGeneratorService;
 use App\Services\RagIngestionService;
 use App\Services\RagRetrievalService;
 use App\Support\IconSvg;
@@ -25,6 +26,8 @@ $ollamaClient = $app['ollama_client'];
 $contextWindowService = $app['context_window'];
 /** @var ModelMetadataService $modelMetadataService */
 $modelMetadataService = $app['model_metadata_service'];
+/** @var PromptGeneratorService $promptGeneratorService */
+$promptGeneratorService = $app['prompt_generator_service'];
 /** @var SqliteDocumentChunkRepository $documentChunkRepository */
 $documentChunkRepository = $app['document_chunk_repository'];
 /** @var RagIngestionService $ragIngestionService */
@@ -186,6 +189,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['persona_action'])) {
                     (string) $persona['prompt_content'],
                     $conversationRepository->messages()
                 )
+            ),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'prompt_generate') {
+    try {
+        $selectedModel = trim((string) ($_POST['model'] ?? $defaultModel));
+
+        if ($selectedModel === '' || ($availableModels && !in_array($selectedModel, $availableModels, true))) {
+            throw new RuntimeException('Modelo inválido ou indisponível no Ollama local.');
+        }
+
+        jsonResponse([
+            'success' => true,
+            'prompt_content' => $promptGeneratorService->generate(
+                $selectedModel,
+                (string) ($_POST['name'] ?? ''),
+                (string) ($_POST['description'] ?? '')
             ),
         ]);
     } catch (Throwable $error) {
