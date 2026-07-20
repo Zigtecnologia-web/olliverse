@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 use App\Config\AppConfig;
 use App\Http\ChatStreamHandler;
+use App\Repositories\SqliteDocumentChunkRepository;
 use App\Repositories\SqliteConversationRepository;
 use App\Repositories\SqlitePersonaRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
 use App\Services\OllamaClient;
+use App\Services\RagIngestionService;
+use App\Services\RagRetrievalService;
 use App\Support\IconSvg;
 
 $app = require __DIR__ . '/bootstrap/app.php';
@@ -22,6 +25,12 @@ $ollamaClient = $app['ollama_client'];
 $contextWindowService = $app['context_window'];
 /** @var ModelMetadataService $modelMetadataService */
 $modelMetadataService = $app['model_metadata_service'];
+/** @var SqliteDocumentChunkRepository $documentChunkRepository */
+$documentChunkRepository = $app['document_chunk_repository'];
+/** @var RagIngestionService $ragIngestionService */
+$ragIngestionService = $app['rag_ingestion_service'];
+/** @var RagRetrievalService $ragRetrievalService */
+$ragRetrievalService = $app['rag_retrieval_service'];
 /** @var \PDO $pdo */
 $pdo = $app['pdo'];
 
@@ -44,6 +53,54 @@ if (($_GET['action'] ?? '') === 'model_metadata') {
 
     echo json_encode($modelMetadataService->metadata($selectedModel), JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+if (($_GET['action'] ?? '') === 'rag_documents') {
+    jsonResponse([
+        'success' => true,
+        'documents' => $documentChunkRepository->sources(),
+    ]);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_ingest') {
+    try {
+        $upload = uploadedRagFile();
+        $result = $ragIngestionService->ingest(
+            (string) $upload['name'],
+            (string) $upload['content']
+        );
+
+        jsonResponse([
+            'success' => true,
+            'document' => $result,
+            'documents' => $documentChunkRepository->sources(),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_delete') {
+    try {
+        $deleted = $documentChunkRepository->deleteDocument((int) ($_POST['document_id'] ?? 0));
+
+        if (!$deleted) {
+            throw new RuntimeException('Documento não encontrado para exclusão.');
+        }
+
+        jsonResponse([
+            'success' => true,
+            'documents' => $documentChunkRepository->sources(),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
 }
 
 if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
@@ -81,7 +138,8 @@ $chatStreamHandler = new ChatStreamHandler(
     $config,
     $ollamaClient,
     $conversationRepository,
-    $contextWindowService
+    $contextWindowService,
+    $ragRetrievalService
 );
 $systemPrompt = $conversationRepository->systemPrompt($config->defaultSystemPrompt);
 $personas = $personaRepository->all();
@@ -153,15 +211,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_prompt'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {
+    $ragEnabled = ($_POST['rag_enabled'] ?? '0') === '1';
+    $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
+    $ragDocumentIds = selectedRagDocumentIds();
+
     $chatStreamHandler->handle(
         trim((string) $_POST['prompt']),
         trim((string) ($_POST['model'] ?? $defaultModel)),
-        $availableModels
+        $availableModels,
+        $ragEnabled && ($useAllRagDocuments || $ragDocumentIds !== []),
+        $useAllRagDocuments ? [] : $ragDocumentIds
     );
 }
 
 $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja processar ou refatorar hoje?';
 $initialMessages = $conversationRepository->messages();
+$initialRagDocuments = $documentChunkRepository->sources();
 $initialContextUsage = $contextWindowService->usage(
     $contextWindowService->withSystemPrompt($systemPrompt, $initialMessages)
 );
@@ -193,5 +258,61 @@ function jsonResponse(array $payload, int $status = 200): never
     header('Content-Type: application/json; charset=UTF-8');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+/**
+ * @return array{name: string, content: string}
+ */
+function uploadedRagFile(): array
+{
+    $file = $_FILES['document'] ?? null;
+
+    if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Envie um arquivo de texto para adicionar.');
+    }
+
+    $size = (int) ($file['size'] ?? 0);
+
+    if ($size <= 0 || $size > 2 * 1024 * 1024) {
+        throw new RuntimeException('O arquivo precisa ter até 2 MB.');
+    }
+
+    $tmpName = (string) ($file['tmp_name'] ?? '');
+
+    if (!is_file($tmpName) || !is_readable($tmpName)) {
+        throw new RuntimeException('Não foi possível acessar o arquivo enviado.');
+    }
+
+    $content = file_get_contents($tmpName);
+
+    if (!is_string($content) || trim($content) === '') {
+        throw new RuntimeException('Não foi possível ler texto do arquivo.');
+    }
+
+    if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $content) === 1) {
+        throw new RuntimeException('Por enquanto, o RAG aceita apenas arquivos de texto.');
+    }
+
+    return [
+        'name' => basename((string) ($file['name'] ?? 'documento.txt')),
+        'content' => $content,
+    ];
+}
+
+/**
+ * @return array<int, int>
+ */
+function selectedRagDocumentIds(): array
+{
+    $documentIds = $_POST['rag_document_ids'] ?? [];
+
+    if (!is_array($documentIds)) {
+        $documentIds = [$documentIds];
+    }
+
+    return array_values(array_unique(array_filter(
+        array_map(static fn (mixed $documentId): int => (int) $documentId, $documentIds),
+        static fn (int $documentId): bool => $documentId > 0
+    )));
 }
 require __DIR__ . '/views/chat.php';

@@ -9,6 +9,7 @@ use App\Contracts\ConversationRepository;
 use App\Services\ContextWindowService;
 use App\Services\OllamaClient;
 use App\Services\OllamaStreamException;
+use App\Services\RagRetrievalService;
 use App\Support\ErrorMessage;
 use Throwable;
 
@@ -19,14 +20,21 @@ final readonly class ChatStreamHandler
         private OllamaClient $ollamaClient,
         private ConversationRepository $conversationRepository,
         private ContextWindowService $contextWindowService,
+        private ?RagRetrievalService $ragRetrievalService = null,
     ) {
     }
 
     /**
      * @param array<int, string> $availableModels
+     * @param array<int, int> $ragDocumentIds
      */
-    public function handle(string $prompt, string $selectedModel, array $availableModels): never
-    {
+    public function handle(
+        string $prompt,
+        string $selectedModel,
+        array $availableModels,
+        bool $ragEnabled = false,
+        array $ragDocumentIds = []
+    ): never {
         ini_set('display_errors', '0');
         $this->applyExecutionLimit();
 
@@ -75,11 +83,24 @@ final readonly class ChatStreamHandler
                 'content' => $prompt,
             ];
 
-            $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $systemPrompt);
-            $messagesForContext = $this->contextWindowService->withSystemPrompt($systemPrompt, $conversationMessages);
+            $effectiveSystemPrompt = $systemPrompt;
+            $messagesForContext = $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages);
+            $ragChunks = $ragEnabled && $this->ragRetrievalService !== null
+                ? $this->ragRetrievalService->retrieve($prompt, 3, $ragDocumentIds)
+                : [];
+            $effectiveSystemPrompt = $this->ragRetrievalService?->augmentSystemPrompt($systemPrompt, $ragChunks) ?? $systemPrompt;
+            $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $effectiveSystemPrompt);
+            $messagesForContext = $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages);
 
             NdjsonResponse::start();
             $headersSent = true;
+
+            if ($ragEnabled && $this->ragRetrievalService !== null) {
+                NdjsonResponse::emit([
+                    'type' => 'rag_metadata',
+                    'sources' => $this->ragRetrievalService->metadata($ragChunks),
+                ]);
+            }
 
             try {
                 $assistantResponse = $this->ollamaClient->streamChat([
@@ -90,7 +111,7 @@ final readonly class ChatStreamHandler
                     NdjsonResponse::emit($payload);
                 });
             } catch (OllamaStreamException $error) {
-                $this->emitRequestError($error->getMessage(), $systemPrompt, $messagesForContext);
+                $this->emitRequestError($error->getMessage(), $effectiveSystemPrompt, $messagesForContext);
                 exit;
             }
 

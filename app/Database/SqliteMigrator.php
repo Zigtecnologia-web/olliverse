@@ -53,9 +53,37 @@ final readonly class SqliteMigrator
             )'
         );
 
+        $this->pdo->exec(
+            'CREATE TABLE IF NOT EXISTS document_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id INTEGER NULL,
+                source_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                token_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )'
+        );
+
+        $this->pdo->exec(
+            'CREATE TABLE IF NOT EXISTS rag_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )'
+        );
+
+        if (!$this->hasColumn('document_chunks', 'document_id')) {
+            $this->pdo->exec('ALTER TABLE document_chunks ADD COLUMN document_id INTEGER NULL');
+        }
+
+        $this->attachExistingChunksToDocuments();
+
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id ON messages(chat_id, id)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_chats_persona_id ON chats(persona_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_document_chunks_source_name ON document_chunks(source_name)');
 
         $this->seedPersonas();
         $this->attachExistingChatsToPersonas();
@@ -115,6 +143,54 @@ final readonly class SqliteMigrator
                 'updated_at' => $now,
             ]);
         }
+    }
+
+    private function attachExistingChunksToDocuments(): void
+    {
+        $sources = $this->pdo
+            ->query('SELECT source_name, MIN(created_at) AS created_at FROM document_chunks GROUP BY source_name')
+            ->fetchAll();
+
+        foreach ($sources as $source) {
+            $sourceName = (string) ($source['source_name'] ?? '');
+
+            if ($sourceName === '') {
+                continue;
+            }
+
+            $documentId = $this->findOrCreateRagDocument($sourceName, (string) ($source['created_at'] ?? date('Y-m-d H:i:s')));
+            $statement = $this->pdo->prepare(
+                'UPDATE document_chunks
+                 SET document_id = :document_id
+                 WHERE source_name = :source_name AND document_id IS NULL'
+            );
+            $statement->execute([
+                'document_id' => $documentId,
+                'source_name' => $sourceName,
+            ]);
+        }
+    }
+
+    private function findOrCreateRagDocument(string $sourceName, string $createdAt): int
+    {
+        $statement = $this->pdo->prepare('SELECT id FROM rag_documents WHERE source_name = :source_name LIMIT 1');
+        $statement->execute(['source_name' => $sourceName]);
+        $id = $statement->fetchColumn();
+
+        if ($id !== false) {
+            return (int) $id;
+        }
+
+        $statement = $this->pdo->prepare(
+            'INSERT INTO rag_documents (source_name, created_at)
+             VALUES (:source_name, :created_at)'
+        );
+        $statement->execute([
+            'source_name' => $sourceName,
+            'created_at' => $createdAt !== '' ? $createdAt : date('Y-m-d H:i:s'),
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     private function attachExistingChatsToPersonas(): void

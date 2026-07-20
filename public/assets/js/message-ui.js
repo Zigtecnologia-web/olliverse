@@ -58,6 +58,25 @@ function finalizeStreamingAssistantMessage(assistantMessage, text) {
     scrollToBottom();
 }
 
+function appendRagSources(messageGroup, sources) {
+    if (!Array.isArray(sources) || sources.length === 0) {
+        return;
+    }
+
+    const sourceNames = sources
+        .map((source) => source?.source_name || '')
+        .filter(Boolean);
+
+    if (sourceNames.length === 0) {
+        return;
+    }
+
+    const sourceInfo = document.createElement('div');
+    sourceInfo.className = 'rag-source-info';
+    sourceInfo.textContent = `Baseado em: ${sourceNames.join(', ')}`;
+    messageGroup.appendChild(sourceInfo);
+}
+
 function renderUserMessage(messageGroup, messageDiv, text) {
     const messageText = document.createElement('span');
 

@@ -155,6 +155,7 @@ Valores suportados por ambiente:
 | `OLLAMA_RESPONSE_TIMEOUT` | `180` | Timeout maximo da resposta |
 | `MODEL_METADATA_CACHE_TTL` | `3600` | Tempo de cache dos metadados do modelo |
 | `SQLITE_DATABASE_PATH` | `storage/database.sqlite` | Caminho do banco SQLite |
+| `RAG_EMBEDDING_MODEL` | `nomic-embed-text` | Modelo usado para gerar embeddings dos documentos |
 
 Tambem existem modelos preferenciais definidos no codigo:
 
@@ -498,6 +499,98 @@ Caracteristicas:
 - mensagens do assistente alinhadas a esquerda;
 - estado de digitacao com pontos animados;
 - responsividade para telas pequenas.
+
+### 8.21 RAG local e botao Usar documentos
+
+RAG significa usar documentos locais como contexto adicional para a resposta da IA.
+
+Na interface, isso aparece como o botao **Usar documentos**.
+
+Quando **Usar documentos** esta desligado:
+
+1. o chat funciona normalmente;
+2. a IA recebe apenas a persona/system prompt e o historico da conversa;
+3. documentos indexados nao entram na resposta.
+
+Quando **Usar documentos** esta ligado:
+
+1. o usuario envia uma pergunta;
+2. o sistema transforma essa pergunta em um vetor de significado usando o modelo de embeddings;
+3. o sistema verifica quais documentos devem ser usados;
+4. se **Todos** estiver marcado, busca em todos os documentos indexados;
+5. se um ou mais documentos especificos estiverem marcados, busca apenas nesses documentos;
+6. o sistema procura no SQLite os pedacos de documentos mais parecidos com a pergunta;
+7. os 3 trechos mais relevantes sao adicionados ao system prompt enviado ao modelo de chat;
+8. a IA responde considerando a conversa e esses trechos recuperados;
+9. a interface pode exibir uma indicacao como `Baseado em: nome-do-arquivo.md`.
+
+Na lista de documentos:
+
+1. **Todos** significa usar todos os documentos indexados;
+2. marcar um documento especifico desmarca **Todos** e limita a busca;
+3. marcar dois ou mais documentos faz a busca usar somente esse conjunto;
+4. o botao `x` remove o documento indexado e seus chunks;
+5. remover um documento impede que ele seja usado em respostas futuras.
+
+Importante: marcar **Usar documentos** nao indexa arquivos. Para o botao ter efeito, primeiro e necessario selecionar um arquivo e clicar em **Indexar**.
+
+O fluxo de indexacao funciona assim:
+
+1. o usuario seleciona um arquivo de texto;
+2. o backend le o conteudo;
+3. o texto e dividido em pedacos pequenos, chamados chunks;
+4. cada chunk e enviado ao Ollama para gerar embedding;
+5. o chunk e o embedding sao salvos na tabela `document_chunks`;
+6. em perguntas futuras, esses chunks podem ser recuperados por similaridade.
+
+O Ollama possui funcionalidade propria para gerar embeddings. Neste projeto, essa chamada e feita pelo backend usando:
+
+```text
+POST /api/embeddings
+```
+
+Embedding nao e uma resposta em texto para o usuario. E uma lista de numeros que representa o significado aproximado de um trecho. O sistema usa esses numeros para comparar a pergunta com os chunks salvos no banco e encontrar os trechos mais parecidos.
+
+Existe uma diferenca importante entre os modelos:
+
+1. **Modelo de chat:** responde mensagens, por exemplo `llama3.2:latest`.
+2. **Modelo de embedding:** transforma texto em vetor, por exemplo `nomic-embed-text`.
+
+Por isso, ter um modelo de chat instalado no Ollama nao garante que o RAG consiga indexar documentos. Para indexar, tambem precisa existir um modelo de embedding.
+
+O modelo usado para ler documentos e definido por `RAG_EMBEDDING_MODEL`. O padrao atual e:
+
+```text
+nomic-embed-text
+```
+
+Se aparecer a mensagem abaixo:
+
+```text
+O modelo de leitura de documentos nao esta instalado no Ollama. Rode: ollama pull nomic-embed-text
+```
+
+significa que o Ollama local ainda nao possui o modelo de embeddings. A correcao e executar:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Depois disso, a indexacao deve conseguir gerar embeddings.
+
+Sobre tamanho dos arquivos: o arquivo inteiro nao precisa ser pequeno. O que precisa ser pequeno e cada chunk enviado ao modelo de embeddings. Por isso o sistema quebra o texto antes de chamar o Ollama. O chunker atual usa:
+
+- minimo aproximado de `500` caracteres;
+- maximo aproximado de `1500` caracteres;
+- overlap de `50` caracteres.
+
+Esse limite evita erros como:
+
+```text
+the input length exceeds the context length
+```
+
+Esse erro acontece quando um trecho enviado ao modelo ficou maior que a janela de contexto permitida pelo modelo de embeddings.
 
 ## 9. Contratos HTTP atuais
 
@@ -931,6 +1024,7 @@ As specs em `IA/Specs` indicam evolucoes desejadas.
 - System prompt vindo de persona.
 - Controle de janela de contexto.
 - Streaming consistente em NDJSON.
+- RAG local com ingestao de documentos de texto e busca por similaridade.
 
 ### Ainda aparece como evolucao futura
 
@@ -939,7 +1033,7 @@ As specs em `IA/Specs` indicam evolucoes desejadas.
 - Full-Text Search com SQLite FTS5.
 - Arquivamento de conversas.
 - Exportacao de chat para JSON ou Markdown.
-- RAG.
+- Melhorias avancadas de RAG, como filtros por documento e remocao visual de fontes.
 - Metadados de modelos mais ricos.
 - Titulo gerado por IA ou editavel pelo usuario.
 
@@ -1061,6 +1155,8 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Copia resposta do assistente.
 - [x] Reusa pergunta do usuario.
 - [x] Possui layout responsivo basico.
+- [x] Indexa documentos de texto para RAG local.
+- [x] Usa documentos indexados como contexto opcional no chat.
 
 ## 20. Resumo executivo
 

@@ -53,6 +53,24 @@
         </div>
     </div>
 
+    <div class="rag-panel">
+        <div class="rag-panel-main">
+            <div class="rag-toggle-field">
+                <label class="toggle-switch" for="ragToggle">
+                    <input type="checkbox" id="ragToggle">
+                    <span class="toggle-track" aria-hidden="true"></span>
+                    <span class="toggle-label">Usar documentos</span>
+                </label>
+            </div>
+            <div id="ragDocumentList" class="rag-document-list" aria-live="polite"></div>
+        </div>
+        <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
+            <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,text/*">
+            <button type="button" id="ragPickFileBtn" class="secondary-config-btn">Adicionar documento</button>
+        </form>
+        <div id="ragStatus" class="rag-status" aria-live="polite"></div>
+    </div>
+
     <div class="chat-messages" id="chatMessages">
     <?php if ($initialMessages === []): ?>
         <div class="message-group assistant">
@@ -169,6 +187,7 @@
         chatId: <?php echo json_encode($chatId, JSON_UNESCAPED_UNICODE); ?>,
         hasAvailableModels: <?php echo json_encode((bool) $availableModels); ?>,
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
+        initialRagDocuments: <?php echo json_encode($initialRagDocuments, JSON_UNESCAPED_UNICODE); ?>,
         personas: <?php echo json_encode($personas, JSON_UNESCAPED_UNICODE); ?>,
         activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
     };
@@ -177,11 +196,12 @@
         modelMetadataCache: new Map(),
     };
 </script>
-<script src="public/assets/js/model-panel.js"></script>
-<script src="public/assets/js/chat-renderer.js"></script>
-<script src="public/assets/js/chat-stream.js"></script>
-<script src="public/assets/js/message-ui.js"></script>
-<script src="public/assets/js/app.js"></script>
+	<script src="public/assets/js/model-panel.js"></script>
+	<script src="public/assets/js/chat-renderer.js"></script>
+	<script src="public/assets/js/chat-stream.js"></script>
+	<script src="public/assets/js/message-ui.js"></script>
+	<script src="public/assets/js/rag-panel.js"></script>
+	<script src="public/assets/js/app.js"></script>
 
 </body>
 </html>

@@ -8,6 +8,7 @@ updateContextUsage(initialContextUsage);
 renderPersistedAssistantMessages();
 initModelPicker();
 initPersonaControls();
+initRagPanel();
 
 document.getElementById('chatForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -19,9 +20,24 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     const personaSelect = document.getElementById('personaSelect');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChatBtn');
+    const ragToggle = document.getElementById('ragToggle');
+    const ragPickFileBtn = document.getElementById('ragPickFileBtn');
+    const ragUploadBtn = document.getElementById('ragUploadBtn');
+    const ragAllDocuments = document.getElementById('ragAllDocuments');
     const messagesContainer = document.getElementById('chatMessages');
     const prompt = inputEl.value.trim();
     const model = modelSelect.value;
+    const ragEnabled = ragToggle?.checked ? '1' : '0';
+    const body = new URLSearchParams({
+        prompt,
+        model,
+        rag_enabled: ragEnabled,
+        rag_all_documents: ragAllDocuments?.checked ? '1' : '0',
+    });
+
+    getSelectedRagDocumentIds().forEach((documentId) => {
+        body.append('rag_document_ids[]', String(documentId));
+    });
 
     if (!prompt || !model || !hasAvailableModels) return;
 
@@ -35,18 +51,23 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     modelMenuButton.disabled = true;
     modelInfoBtn.disabled = true;
     personaSelect.disabled = true;
+    if (ragToggle) ragToggle.disabled = true;
+    if (ragPickFileBtn) ragPickFileBtn.disabled = true;
+    if (ragUploadBtn) ragUploadBtn.disabled = true;
+    setRagDocumentControlsDisabled(true);
     sendBtn.disabled = true;
     newChatBtn.disabled = true;
 
     const assistantMessage = createStreamingAssistantMessage();
     let assistantText = '';
+    let ragSources = [];
 
     fetch(window.location.href, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: 'prompt=' + encodeURIComponent(prompt) + '&model=' + encodeURIComponent(model)
+        body: body.toString()
     })
     .then(response => {
         if (!response.ok) throw new Error('Erro na requisição.');
@@ -55,6 +76,10 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
         }, (payload) => {
             if (payload.type === 'meta' && payload.context_usage) {
                 updateContextUsage(payload.context_usage);
+            }
+
+            if (payload.type === 'rag_metadata') {
+                ragSources = payload.sources || [];
             }
 
             if (payload.type === 'error') {
@@ -68,6 +93,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     })
     .then(() => {
         finalizeStreamingAssistantMessage(assistantMessage, assistantText);
+        appendRagSources(assistantMessage.group, ragSources);
     })
     .catch(error => {
         assistantMessage.group.remove();
@@ -81,6 +107,10 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
         modelMenuButton.disabled = !hasAvailableModels;
         modelInfoBtn.disabled = !hasAvailableModels;
         personaSelect.disabled = false;
+        if (ragToggle) ragToggle.disabled = false;
+        if (ragPickFileBtn) ragPickFileBtn.disabled = false;
+        if (ragUploadBtn) ragUploadBtn.disabled = false;
+        setRagDocumentControlsDisabled(false);
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
         inputEl.focus();

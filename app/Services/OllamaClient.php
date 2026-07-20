@@ -10,6 +10,7 @@ final readonly class OllamaClient
         private string $baseUrl,
         private int $connectTimeout,
         private int $responseTimeout,
+        private array $nonChatModels = [],
     ) {
     }
 
@@ -27,7 +28,27 @@ final readonly class OllamaClient
         return array_values(array_filter(array_map(
             static fn (array $model): string => $model['name'] ?? '',
             $result['models']
-        )));
+        ), fn (string $modelName): bool => $this->isChatModel($modelName)));
+    }
+
+    private function isChatModel(string $modelName): bool
+    {
+        $normalizedModel = $this->normalizeModelName($modelName);
+
+        foreach ($this->nonChatModels as $nonChatModel) {
+            if ($normalizedModel === $this->normalizeModelName((string) $nonChatModel)) {
+                return false;
+            }
+        }
+
+        return preg_match('/(^|[-_:])(embed|embedding)([-_:]|$)/i', $modelName) !== 1;
+    }
+
+    private function normalizeModelName(string $modelName): string
+    {
+        $modelName = strtolower(trim($modelName));
+
+        return str_ends_with($modelName, ':latest') ? substr($modelName, 0, -7) : $modelName;
     }
 
     public function modelSizeGb(string $modelName): ?float
@@ -45,6 +66,25 @@ final readonly class OllamaClient
         }
 
         return null;
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    public function embedding(string $modelName, string $text): array
+    {
+        $result = $this->postJson('/api/embeddings', [
+            'model' => $modelName,
+            'prompt' => $text,
+        ], $this->responseTimeout);
+
+        $embedding = $result['embedding'] ?? null;
+
+        if (!is_array($embedding)) {
+            return [];
+        }
+
+        return array_map(static fn (mixed $value): float => (float) $value, $embedding);
     }
 
     /**
@@ -116,6 +156,41 @@ final readonly class OllamaClient
         $result = json_decode(is_string($response) ? $response : '', true);
 
         return is_array($result) ? $result : [];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function postJson(string $path, array $payload, int $timeout): array
+    {
+        $ch = curl_init($this->baseUrl . $path);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $this->connectTimeout);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+
+        $response = curl_exec($ch);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError !== '') {
+            throw new \RuntimeException('Falha ao conectar no Ollama: ' . $curlError);
+        }
+
+        $result = json_decode(is_string($response) ? $response : '', true);
+
+        if (!is_array($result)) {
+            throw new \RuntimeException('Ollama retornou uma resposta inválida.');
+        }
+
+        if (($result['error'] ?? '') !== '') {
+            throw new \RuntimeException((string) $result['error']);
+        }
+
+        return $result;
     }
 
     /**
