@@ -9,9 +9,27 @@
 </head>
 <body>
 
+<div class="app-shell" id="appShell">
+<aside class="history-sidebar" id="historySidebar" aria-label="Histórico de conversas">
+    <div class="history-sidebar-header">
+        <div>
+            <h2>Histórico</h2>
+            <span id="historyCount" class="history-count">0 conversas</span>
+        </div>
+        <button type="button" id="historyCloseBtn" class="history-icon-btn" aria-label="Recolher histórico" title="Recolher histórico" data-tooltip="Recolher histórico"><?php echo iconSvg('sidebar'); ?></button>
+    </div>
+    <div class="history-search">
+        <span class="history-search-icon" aria-hidden="true"><?php echo iconSvg('search'); ?></span>
+        <input type="search" id="historySearchInput" class="history-search-input" placeholder="Buscar no histórico" autocomplete="off">
+    </div>
+    <div id="historyStatus" class="history-status" aria-live="polite"></div>
+    <ul id="historyList" class="history-list"></ul>
+</aside>
+
 <div class="chat-container">
     <div class="chat-header">
         <div class="header-title">
+            <button type="button" id="historyToggleBtn" class="config-btn history-toggle-btn" aria-label="Abrir histórico" title="Abrir histórico" data-tooltip="Abrir histórico"><?php echo iconSvg('sidebar'); ?></button>
             <h1>Olliverse</h1>
             <div class="model-controls">
                 <div class="model-field">
@@ -48,6 +66,7 @@
             </div>
         </div>
         <div class="header-actions">
+            <a id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" href="index.php?action=export&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('download'); ?></a>
             <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
             <button type="button" id="newChatBtn" class="new-chat-btn">+ Nova conversa</button>
         </div>
@@ -107,6 +126,7 @@
         </form>
     </div>
 </div>
+</div>
 
 <div class="modal-backdrop" id="modelInfoModal" aria-hidden="true">
     <div class="skill-modal" role="dialog" aria-modal="true" aria-labelledby="modelInfoModalTitle">
@@ -135,6 +155,23 @@
                     <span class="model-details-value" id="modelInfoQuantization">-</span>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="deleteChatModal" aria-hidden="true">
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteChatModalTitle">
+        <div class="modal-header">
+            <h2 id="deleteChatModalTitle">Deletar conversa</h2>
+            <button type="button" id="closeDeleteChatModalBtn" class="modal-close-btn" aria-label="Fechar confirmação"><?php echo iconSvg('x'); ?></button>
+        </div>
+        <div class="modal-body">
+            <p id="deleteChatModalText" class="confirm-modal-text">Deseja realmente deletar esta conversa?</p>
+            <div id="deleteChatStatus" class="skill-status" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" id="cancelDeleteChatBtn" class="secondary-config-btn">Não</button>
+            <button type="button" id="confirmDeleteChatBtn" class="save-config-btn danger">Sim, deletar</button>
         </div>
     </div>
 </div>
@@ -194,11 +231,16 @@
         hasAvailableModels: <?php echo json_encode((bool) $availableModels); ?>,
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
         initialRagDocuments: <?php echo json_encode($initialRagDocuments, JSON_UNESCAPED_UNICODE); ?>,
+        initialChatHistory: <?php echo json_encode($initialChatHistory, JSON_UNESCAPED_UNICODE); ?>,
         personas: <?php echo json_encode($personas, JSON_UNESCAPED_UNICODE); ?>,
         activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
     };
     window.OlliverseState = {
         activeTooltipButton: null,
+        historyOpen: true,
+        historySearchTimer: null,
+        historySearchQuery: '',
+        historySearchChatIds: null,
         modelMetadataCache: new Map(),
     };
 </script>
@@ -206,6 +248,7 @@
 	<script src="public/assets/js/chat-renderer.js"></script>
 	<script src="public/assets/js/chat-stream.js"></script>
 	<script src="public/assets/js/message-ui.js"></script>
+	<script src="public/assets/js/history-panel.js"></script>
 	<script src="public/assets/js/rag-panel.js"></script>
 	<script src="public/assets/js/app.js"></script>
 

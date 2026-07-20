@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 use App\Config\AppConfig;
 use App\Http\ChatStreamHandler;
+use App\Repositories\SqliteChatExportRepository;
+use App\Repositories\SqliteChatHistoryRepository;
 use App\Repositories\SqliteDocumentChunkRepository;
 use App\Repositories\SqliteConversationRepository;
 use App\Repositories\SqlitePersonaRepository;
+use App\Repositories\SqliteSearchRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
@@ -40,6 +43,92 @@ $pdo = $app['pdo'];
 $availableModels = $ollamaClient->listModels();
 $defaultModel = ModelSelector::defaultModel($availableModels, $config->preferredModels);
 $personaRepository = new SqlitePersonaRepository($pdo, $config->defaultSystemPrompt);
+$chatHistoryRepository = new SqliteChatHistoryRepository($pdo);
+
+if (($_GET['action'] ?? '') === 'history') {
+    jsonResponse([
+        'success' => true,
+        'chats' => $chatHistoryRepository->all(),
+    ]);
+}
+
+if (($_GET['action'] ?? '') === 'search') {
+    $searchQuery = trim((string) ($_GET['q'] ?? ''));
+    $chatIds = $searchQuery === ''
+        ? []
+        : (new SqliteSearchRepository($pdo))->chatIdsForQuery($searchQuery);
+
+    jsonResponse([
+        'success' => true,
+        'query' => $searchQuery,
+        'chat_ids' => $chatIds,
+    ]);
+}
+
+if (($_GET['action'] ?? '') === 'export') {
+    $exportChatId = (int) ($_GET['chat_id'] ?? 0);
+    $exportRepository = new SqliteChatExportRepository($pdo);
+    $payload = $exportRepository->markdownPayload($exportChatId);
+
+    if ($payload === null) {
+        http_response_code(404);
+        echo 'Conversa não encontrada.';
+        exit;
+    }
+
+    header('Content-Type: text/markdown; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $exportRepository->filename($payload['chat']) . '"');
+    echo $exportRepository->toMarkdown($payload);
+    exit;
+}
+
+if (($_GET['action'] ?? '') === 'chat_data') {
+    $requestedChatId = (int) ($_GET['chat_id'] ?? 0);
+
+    if ($requestedChatId <= 0 || !SqliteConversationRepository::exists($pdo, $requestedChatId)) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'Conversa não encontrada.',
+        ], 404);
+    }
+
+    $requestedConversationRepository = new SqliteConversationRepository(
+        $pdo,
+        $contextWindowService,
+        $requestedChatId,
+        $defaultModel
+    );
+    $requestedSystemPrompt = $requestedConversationRepository->systemPrompt($config->defaultSystemPrompt);
+    $requestedMessages = $requestedConversationRepository->messages();
+    $requestedPersona = $personaRepository->activeForChat($requestedChatId);
+
+    jsonResponse([
+        'success' => true,
+        'chat' => $chatHistoryRepository->find($requestedChatId),
+        'messages' => $requestedMessages,
+        'active_persona' => $requestedPersona,
+        'context_usage' => $contextWindowService->usage(
+            $contextWindowService->withSystemPrompt($requestedSystemPrompt, $requestedMessages)
+        ),
+    ]);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'delete_chat') {
+    $deleteChatId = (int) ($_POST['chat_id'] ?? 0);
+
+    if (!$chatHistoryRepository->delete($deleteChatId)) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'Conversa não encontrada para exclusão.',
+        ], 404);
+    }
+
+    jsonResponse([
+        'success' => true,
+        'deleted_chat_id' => $deleteChatId,
+        'chats' => $chatHistoryRepository->all(),
+    ]);
+}
 
 if (($_GET['action'] ?? '') === 'model_metadata') {
     $selectedModel = trim((string) ($_GET['model'] ?? ''));
@@ -254,6 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {
 $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja processar ou refatorar hoje?';
 $initialMessages = $conversationRepository->messages();
 $initialRagDocuments = $documentChunkRepository->sources();
+$initialChatHistory = $chatHistoryRepository->all();
 $initialContextUsage = $contextWindowService->usage(
     $contextWindowService->withSystemPrompt($systemPrompt, $initialMessages)
 );

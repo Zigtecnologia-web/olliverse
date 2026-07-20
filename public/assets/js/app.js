@@ -8,6 +8,7 @@ updateContextUsage(initialContextUsage);
 renderPersistedAssistantMessages();
 initModelPicker();
 initPersonaControls();
+initHistoryPanel();
 initRagPanel();
 
 document.getElementById('chatForm').addEventListener('submit', function(e) {
@@ -94,6 +95,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     .then(() => {
         finalizeStreamingAssistantMessage(assistantMessage, assistantText);
         appendRagSources(assistantMessage.group, ragSources);
+        refreshChatHistory();
     })
     .catch(error => {
         assistantMessage.group.remove();
@@ -169,8 +171,13 @@ document.addEventListener('keydown', function(event) {
         closeModelInfoModal();
     }
 
+    if (event.key === 'Escape' && document.getElementById('deleteChatModal').classList.contains('open')) {
+        closeDeleteChatModal();
+    }
+
     if (event.key === 'Escape') {
         closeModelMenu();
+        closeHistoryMenus();
     }
 });
 

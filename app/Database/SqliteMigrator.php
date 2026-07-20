@@ -85,8 +85,44 @@ final readonly class SqliteMigrator
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_document_chunks_source_name ON document_chunks(source_name)');
 
+        $this->migrateMessageSearch();
+
         $this->seedPersonas();
         $this->attachExistingChatsToPersonas();
+    }
+
+    private function migrateMessageSearch(): void
+    {
+        $this->pdo->exec(
+            'CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+             USING fts5(content, chat_id UNINDEXED)'
+        );
+        $this->pdo->exec('DROP TRIGGER IF EXISTS trg_messages_ai');
+        $this->pdo->exec('DROP TRIGGER IF EXISTS trg_messages_ad');
+        $this->pdo->exec('DROP TRIGGER IF EXISTS trg_messages_au');
+        $this->pdo->exec(
+            'CREATE TRIGGER trg_messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, chat_id)
+                VALUES (new.id, new.content, new.chat_id);
+            END'
+        );
+        $this->pdo->exec(
+            'CREATE TRIGGER trg_messages_ad AFTER DELETE ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+            END'
+        );
+        $this->pdo->exec(
+            'CREATE TRIGGER trg_messages_au AFTER UPDATE OF content, chat_id ON messages BEGIN
+                DELETE FROM messages_fts WHERE rowid = old.id;
+                INSERT INTO messages_fts(rowid, content, chat_id)
+                VALUES (new.id, new.content, new.chat_id);
+            END'
+        );
+        $this->pdo->exec('DELETE FROM messages_fts');
+        $this->pdo->exec(
+            'INSERT INTO messages_fts(rowid, content, chat_id)
+             SELECT id, content, chat_id FROM messages'
+        );
     }
 
     private function hasColumn(string $table, string $column): bool
