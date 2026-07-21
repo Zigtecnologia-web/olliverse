@@ -1,0 +1,12 @@
+{
+    "slug": "data_analyst",
+    "name": "Análise de Dados & Gráficos",
+    "version": "1.0.0",
+    "description": "Gera gráficos interativos a partir de métricas e dados estruturados.",
+    "icon": "📊",
+    "dependencies": {
+        "js": [
+            "https://cdn.jsdelivr.net/npm/chart.js"
+        ]
+    }
+}

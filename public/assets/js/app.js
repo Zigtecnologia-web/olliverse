@@ -10,6 +10,7 @@ initModelPicker();
 initPersonaControls();
 initHistoryPanel();
 initRagPanel();
+initPluginPanel();
 
 document.getElementById('chatForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -178,6 +179,7 @@ document.addEventListener('keydown', function(event) {
         closeModelMenu();
         closeHistoryMenus();
         closeExportMenu();
+        closePluginsMenu();
     }
 });
 

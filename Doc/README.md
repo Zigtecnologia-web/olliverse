@@ -634,6 +634,63 @@ Fluxo:
 
 O arquivo `Doc/README.md` continua sendo a fonte canonica da documentacao funcional e tecnica.
 
+### 8.23 Plugins e graficos
+
+A aplicacao possui uma arquitetura inicial de plugins em `plugins/`.
+
+Cada plugin pode ter:
+
+- `manifest.json` com metadados, dependencias e descricao;
+- `includes/prompt.php` com instrucao adicional para o system prompt;
+- `assets/style.css` com estilos isolados;
+- `assets/script.js` com comportamento proprio do plugin.
+
+O primeiro plugin disponivel e `data_analyst`, exibido como **Analise de Dados & Graficos** no menu de plugins do header.
+
+Quando o plugin esta desligado:
+
+1. o Chart.js nao e injetado no HTML inicial;
+2. o prompt adicional do plugin nao entra no payload do Ollama;
+3. a IA responde apenas pelo comportamento normal da persona e do historico.
+
+Quando o plugin esta ligado:
+
+1. o estado fica guardado em `$_SESSION['olliverse_plugins']`;
+2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
+3. o frontend carrega Chart.js e os assets do plugin sob demanda;
+4. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
+5. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
+
+O prompt do plugin funciona como uma regra nativa de planejamento de grafico. Antes de gerar o bloco `json-chart`, o modelo deve inferir:
+
+- dimensao de agrupamento, usada em `labels`;
+- metrica numerica, usada em `data`;
+- tipo de grafico adequado: `pie`, `bar` ou `line`.
+
+Exemplos de inferencia:
+
+- "grafico por genero" usa cada genero como `labels` e a quantidade de alunos por genero como `data`;
+- "grafico por serie" usa cada serie como `labels` e a quantidade de alunos por serie como `data`;
+- "distribuicao por idade" usa cada idade como `labels` e a quantidade de alunos naquela idade como `data`;
+- "maior nota" ou "compare notas" usa nomes dos alunos como `labels` e as notas como `data`, salvo quando o usuario pedir outra metrica.
+
+Por padrao, `data` deve usar quantidades absolutas. Percentuais so devem ser usados quando o usuario pedir explicitamente porcentagem.
+
+Contrato esperado para o bloco gerado pela IA:
+
+```json
+{
+  "type": "bar",
+  "title": "Titulo da Metrica",
+  "labels": ["Label 1", "Label 2"],
+  "data": [10, 25]
+}
+```
+
+Tipos aceitos: `bar`, `pie` e `line`.
+
+O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, mas o comportamento esperado e sempre o contrato simples acima.
+
 ## 9. Contratos HTTP atuais
 
 ### 9.1 Abrir chat
@@ -827,6 +884,27 @@ GET /index.php?view=docs&chat_id=1
 ```
 
 Renderiza a Central de Documentacao com o conteudo de `Doc/README.md`.
+
+### 9.15 Ativar ou desativar plugin
+
+```http
+POST /index.php?action=plugin_toggle
+Content-Type: application/x-www-form-urlencoded
+
+plugin=data_analyst&active=1
+```
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "plugins": [],
+  "active_plugins": []
+}
+```
+
+O estado e salvo na sessao PHP e passa a valer para as proximas mensagens enviadas ao modelo.
 
 O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 
@@ -1032,6 +1110,10 @@ Transforma erros tecnicos em mensagens mais seguras e detecta erros de contexto.
 
 Gera SVGs inline usados no PHP.
 
+### `App\Services\PluginManager`
+
+Lista manifestos em `plugins/`, guarda os plugins ativos na sessao e retorna prompts/assets dos plugins ativos.
+
 ## 12. Arquivos JavaScript
 
 ### `public/assets/js/app.js`
@@ -1087,6 +1169,18 @@ Faz:
 - copiar resposta;
 - reusar pergunta;
 - exibir tooltips.
+
+### `public/assets/js/plugin-panel.js`
+
+Cuida do menu de plugins no header.
+
+Faz:
+
+- abrir/fechar o menu de plugins;
+- enviar `?action=plugin_toggle`;
+- atualizar `window.OlliverseConfig.plugins`;
+- carregar CSS, dependencias JS e script do plugin sob demanda;
+- reprocessar mensagens do assistente para renderizar blocos `json-chart` quando o plugin esta ativo.
 
 ### `public/assets/js/model-panel.js`
 
@@ -1316,6 +1410,8 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Indexa documentos de texto para RAG local.
 - [x] Usa documentos indexados como contexto opcional no chat.
 - [x] Exibe a Central de Documentacao pelo menu principal.
+- [x] Ativa/desativa plugins por sessao.
+- [x] Renderiza graficos via plugin `data_analyst` a partir de blocos `json-chart`.
 
 ## 20. Resumo executivo
 

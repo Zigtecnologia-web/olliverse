@@ -9,6 +9,7 @@ use App\Repositories\SqliteDocumentChunkRepository;
 use App\Services\ContextWindowService;
 use App\Services\ModelMetadataService;
 use App\Services\OllamaClient;
+use App\Services\PluginManager;
 use App\Services\PromptGeneratorService;
 use App\Services\RagChunkerService;
 use App\Services\RagIngestionService;
@@ -45,6 +46,7 @@ $ollamaClient = new OllamaClient(
     [$config->ragEmbeddingModel]
 );
 $contextWindowService = new ContextWindowService($config->contextTokenLimit);
+$pluginManager = new PluginManager(__DIR__ . '/../plugins');
 $pdo = (new SqliteConnection($config->sqliteDatabasePath))->pdo();
 (new SqliteMigrator($pdo))->migrate();
 $vectorSimilarityService = new VectorSimilarityService();
@@ -71,6 +73,7 @@ return [
     'config' => $config,
     'ollama_client' => $ollamaClient,
     'context_window' => $contextWindowService,
+    'plugin_manager' => $pluginManager,
     'pdo' => $pdo,
     'model_metadata_service' => $modelMetadataService,
     'prompt_generator_service' => $promptGeneratorService,

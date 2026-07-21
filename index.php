@@ -15,6 +15,7 @@ use App\Services\DocumentationService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
 use App\Services\OllamaClient;
+use App\Services\PluginManager;
 use App\Services\PdfExportService;
 use App\Services\PromptGeneratorService;
 use App\Services\RagIngestionService;
@@ -39,6 +40,8 @@ $documentChunkRepository = $app['document_chunk_repository'];
 $ragIngestionService = $app['rag_ingestion_service'];
 /** @var RagRetrievalService $ragRetrievalService */
 $ragRetrievalService = $app['rag_retrieval_service'];
+/** @var PluginManager $pluginManager */
+$pluginManager = $app['plugin_manager'];
 /** @var \PDO $pdo */
 $pdo = $app['pdo'];
 
@@ -225,6 +228,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_de
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'plugin_toggle') {
+    try {
+        $pluginManager->setActive(
+            (string) ($_POST['plugin'] ?? ''),
+            ($_POST['active'] ?? '0') === '1'
+        );
+
+        jsonResponse([
+            'success' => true,
+            'plugins' => $pluginManager->all(),
+            'active_plugins' => $pluginManager->activePlugins(),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
 if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
     $currentChatId = (int) ($_GET['chat_id'] ?? 0);
     $activePersona = $personaRepository->activeForChat($currentChatId);
@@ -261,7 +284,8 @@ $chatStreamHandler = new ChatStreamHandler(
     $ollamaClient,
     $conversationRepository,
     $contextWindowService,
-    $ragRetrievalService
+    $ragRetrievalService,
+    $pluginManager
 );
 $systemPrompt = $conversationRepository->systemPrompt($config->defaultSystemPrompt);
 $personas = $personaRepository->all();
@@ -374,6 +398,8 @@ $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja p
 $initialMessages = $conversationRepository->messages();
 $initialRagDocuments = $documentChunkRepository->sources();
 $initialChatHistory = $chatHistoryRepository->all();
+$availablePlugins = $pluginManager->all();
+$activePlugins = $pluginManager->activePlugins();
 $initialContextUsage = $contextWindowService->usage(
     $contextWindowService->withSystemPrompt($systemPrompt, $initialMessages)
 );

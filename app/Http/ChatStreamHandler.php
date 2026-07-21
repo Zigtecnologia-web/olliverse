@@ -9,6 +9,7 @@ use App\Contracts\ConversationRepository;
 use App\Services\ContextWindowService;
 use App\Services\OllamaClient;
 use App\Services\OllamaStreamException;
+use App\Services\PluginManager;
 use App\Services\RagRetrievalService;
 use App\Support\ErrorMessage;
 use Throwable;
@@ -21,6 +22,7 @@ final readonly class ChatStreamHandler
         private ConversationRepository $conversationRepository,
         private ContextWindowService $contextWindowService,
         private ?RagRetrievalService $ragRetrievalService = null,
+        private ?PluginManager $pluginManager = null,
     ) {
     }
 
@@ -83,12 +85,12 @@ final readonly class ChatStreamHandler
                 'content' => $prompt,
             ];
 
-            $effectiveSystemPrompt = $systemPrompt;
+            $effectiveSystemPrompt = $this->withPluginPrompts($systemPrompt);
             $messagesForContext = $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages);
             $ragChunks = $ragEnabled && $this->ragRetrievalService !== null
                 ? $this->ragRetrievalService->retrieve($prompt, 3, $ragDocumentIds)
                 : [];
-            $effectiveSystemPrompt = $this->ragRetrievalService?->augmentSystemPrompt($systemPrompt, $ragChunks) ?? $systemPrompt;
+            $effectiveSystemPrompt = $this->ragRetrievalService?->augmentSystemPrompt($effectiveSystemPrompt, $ragChunks) ?? $effectiveSystemPrompt;
             $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $effectiveSystemPrompt);
             $messagesForContext = $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages);
 
@@ -140,7 +142,7 @@ final readonly class ChatStreamHandler
             NdjsonResponse::emit([
                 'type' => 'meta',
                 'context_usage' => $this->contextWindowService->usage(
-                    $this->contextWindowService->withSystemPrompt($systemPrompt, $conversationMessages)
+                    $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages)
                 ),
                 'context_trimmed' => $contextWasTrimmed,
             ]);
@@ -200,5 +202,16 @@ final readonly class ChatStreamHandler
         if (function_exists('set_time_limit')) {
             set_time_limit($this->config->ollamaResponseTimeout);
         }
+    }
+
+    private function withPluginPrompts(string $systemPrompt): string
+    {
+        $pluginPrompts = $this->pluginManager?->activePrompts() ?? [];
+
+        if ($pluginPrompts === []) {
+            return $systemPrompt;
+        }
+
+        return trim($systemPrompt . "\n\n" . implode("\n\n", $pluginPrompts));
     }
 }

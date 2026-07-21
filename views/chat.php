@@ -6,6 +6,12 @@
     <title>Olliverse</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js/styles/github-dark.min.css">
     <link rel="stylesheet" href="public/assets/css/app.css">
+    <?php foreach ($activePlugins as $plugin): ?>
+        <?php $pluginStyle = $plugin['assets']['style'] ?? null; ?>
+        <?php if (is_string($pluginStyle) && $pluginStyle !== ''): ?>
+            <link rel="stylesheet" href="<?php echo htmlspecialchars($pluginStyle, ENT_QUOTES, 'UTF-8'); ?>" data-plugin-asset="<?php echo htmlspecialchars((string) $plugin['slug'], ENT_QUOTES, 'UTF-8'); ?>">
+        <?php endif; ?>
+    <?php endforeach; ?>
 </head>
 <body>
 
@@ -67,6 +73,28 @@
         </div>
         <div class="header-actions">
             <a class="config-btn" href="index.php?view=docs&amp;chat_id=<?php echo (int) $chatId; ?>" aria-label="Central de documentação" title="Central de documentação" data-tooltip="Central de documentação"><?php echo iconSvg('book-open'); ?></a>
+            <div class="plugins-menu" id="pluginsMenu">
+                <button type="button" id="pluginsMenuBtn" class="config-btn" aria-label="Gerenciar plugins" title="Gerenciar plugins" data-tooltip="Gerenciar plugins" aria-expanded="false"><?php echo iconSvg('puzzle'); ?></button>
+                <div class="plugins-menu-list" role="menu" aria-labelledby="pluginsMenuBtn">
+                    <div class="plugins-menu-header">Plugins</div>
+                    <?php if ($availablePlugins === []): ?>
+                        <div class="plugins-menu-empty">Nenhum plugin encontrado</div>
+                    <?php else: ?>
+                        <?php foreach ($availablePlugins as $plugin): ?>
+                            <?php $pluginSlug = (string) $plugin['slug']; ?>
+                            <label class="plugin-toggle-item">
+                                <input type="checkbox" data-plugin-toggle="<?php echo htmlspecialchars($pluginSlug, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $plugin['active'] ? 'checked' : ''; ?>>
+                                <span class="toggle-track" aria-hidden="true"></span>
+                                <span class="plugin-toggle-label">
+                                    <span class="plugin-toggle-name"><?php echo htmlspecialchars((string) ($plugin['icon'] ?? ''), ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars((string) ($plugin['name'] ?? $pluginSlug), ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <span class="plugin-toggle-description"><?php echo htmlspecialchars((string) ($plugin['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    <div id="pluginsStatus" class="plugins-status" aria-live="polite"></div>
+                </div>
+            </div>
             <div class="export-menu" id="exportMenu">
                 <button type="button" id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" aria-expanded="false"><?php echo iconSvg('download'); ?></button>
                 <div class="export-menu-list" role="menu" aria-labelledby="exportChatBtn">
@@ -231,6 +259,15 @@
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highlight.js/highlight.min.js"></script>
+<?php foreach ($activePlugins as $plugin): ?>
+    <?php foreach (($plugin['dependencies']['js'] ?? []) as $dependencySrc): ?>
+        <script src="<?php echo htmlspecialchars((string) $dependencySrc, ENT_QUOTES, 'UTF-8'); ?>" data-plugin-asset="<?php echo htmlspecialchars((string) $plugin['slug'], ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <?php endforeach; ?>
+    <?php $pluginScript = $plugin['assets']['script'] ?? null; ?>
+    <?php if (is_string($pluginScript) && $pluginScript !== ''): ?>
+        <script src="<?php echo htmlspecialchars($pluginScript, ENT_QUOTES, 'UTF-8'); ?>" data-plugin-asset="<?php echo htmlspecialchars((string) $plugin['slug'], ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <?php endif; ?>
+<?php endforeach; ?>
 <script>
     window.OlliverseConfig = {
         initialAssistantMessage: <?php echo json_encode($initialAssistantMessage, JSON_UNESCAPED_UNICODE); ?>,
@@ -241,6 +278,8 @@
         initialChatHistory: <?php echo json_encode($initialChatHistory, JSON_UNESCAPED_UNICODE); ?>,
         personas: <?php echo json_encode($personas, JSON_UNESCAPED_UNICODE); ?>,
         activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
+        plugins: <?php echo json_encode($availablePlugins, JSON_UNESCAPED_UNICODE); ?>,
+        activePlugins: <?php echo json_encode($activePlugins, JSON_UNESCAPED_UNICODE); ?>,
     };
     window.OlliverseState = {
         activeTooltipButton: null,
@@ -257,6 +296,7 @@
 	<script src="public/assets/js/message-ui.js"></script>
 	<script src="public/assets/js/history-panel.js"></script>
 	<script src="public/assets/js/rag-panel.js"></script>
+	<script src="public/assets/js/plugin-panel.js"></script>
 	<script src="public/assets/js/app.js"></script>
 
 </body>

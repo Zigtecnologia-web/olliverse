@@ -121,6 +121,121 @@ body.documentation-body {
     position: relative;
 }
 
+.plugins-menu {
+    position: relative;
+}
+
+.plugins-menu.open .config-btn {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: #04d361;
+    color: #04d361;
+}
+
+.plugins-menu-list {
+    background-color: #202027;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
+    display: none;
+    min-width: 300px;
+    padding: 8px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 90;
+}
+
+.plugins-menu.open .plugins-menu-list {
+    display: grid;
+    gap: 8px;
+}
+
+.plugins-menu-header {
+    color: #a8a8b3;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 4px;
+    text-transform: uppercase;
+}
+
+.plugin-toggle-item {
+    align-items: center;
+    border-radius: 6px;
+    color: #c4c4cc;
+    cursor: pointer;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 8px;
+}
+
+.plugin-toggle-item:hover,
+.plugin-toggle-item:focus-within {
+    background-color: rgba(4, 211, 97, 0.08);
+}
+
+.plugin-toggle-item input {
+    height: 1px;
+    opacity: 0;
+    position: absolute;
+    width: 1px;
+}
+
+.plugin-toggle-item .toggle-track {
+    grid-column: 1;
+}
+
+.plugin-toggle-item input:checked + .toggle-track {
+    background-color: rgba(4, 211, 97, 0.18);
+    border-color: #04d361;
+}
+
+.plugin-toggle-item input:checked + .toggle-track::before {
+    background-color: #04d361;
+    transform: translateX(16px);
+}
+
+.plugin-toggle-item input:disabled + .toggle-track {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.plugin-toggle-label {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.plugin-toggle-name,
+.plugin-toggle-description,
+.plugins-menu-empty,
+.plugins-status {
+    overflow-wrap: anywhere;
+}
+
+.plugin-toggle-name {
+    color: #e1e1e6;
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.plugin-toggle-description,
+.plugins-menu-empty,
+.plugins-status {
+    color: #7c7c8a;
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.plugins-status {
+    min-height: 1rem;
+    padding: 0 4px;
+}
+
+.plugins-status.error {
+    color: #f75a68;
+}
+
 .export-menu.open .export-chat-btn {
     background-color: rgba(4, 211, 97, 0.08);
     border-color: #04d361;

@@ -24,6 +24,7 @@ function renderAssistantMessageContent(messageDiv, text) {
     try {
         messageDiv.innerHTML = DOMPurify.sanitize(marked.parse(normalizedText));
         enhanceCodeBlocks(messageDiv);
+        processPluginContent(messageDiv);
     } catch (error) {
         messageDiv.textContent = normalizedText;
     }
@@ -138,6 +139,7 @@ function renderAssistantMessage(messageGroup, messageDiv, text) {
     try {
         messageDiv.innerHTML = DOMPurify.sanitize(marked.parse(normalizedText));
         enhanceCodeBlocks(messageDiv);
+        processPluginContent(messageDiv);
 
         appendCopyResponseButton(messageGroup, text);
     } catch (error) {
@@ -155,10 +157,19 @@ function enhanceCodeBlocks(messageDiv) {
             return;
         }
 
+        block.dataset.rawCode = block.textContent || '';
         highlightCodeBlock(block);
 
         decorateCodeBlock(pre, block);
     });
+}
+
+function processPluginContent(messageDiv) {
+    if (!window.OlliversePlugins || typeof window.OlliversePlugins.processMessage !== 'function') {
+        return;
+    }
+
+    window.OlliversePlugins.processMessage(messageDiv);
 }
 
 function highlightCodeBlock(block) {
@@ -166,6 +177,10 @@ function highlightCodeBlock(block) {
     const originalCode = block.textContent || '';
 
     if (block.dataset.highlighted) {
+        return;
+    }
+
+    if (language === 'json-chart') {
         return;
     }
 
@@ -188,7 +203,7 @@ function decorateCodeBlock(pre, block) {
     const languageLabel = document.createElement('span');
     const copyButton = document.createElement('button');
     const language = detectCodeLanguage(block);
-    const codeText = block.textContent || '';
+    const codeText = block.dataset.rawCode || block.textContent || '';
 
     wrapper.className = 'code-block';
     header.className = 'code-block-header';
