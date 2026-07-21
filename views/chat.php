@@ -66,7 +66,14 @@
             </div>
         </div>
         <div class="header-actions">
-            <a id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" href="index.php?action=export&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('download'); ?></a>
+            <a class="config-btn" href="index.php?view=docs&amp;chat_id=<?php echo (int) $chatId; ?>" aria-label="Central de documentação" title="Central de documentação" data-tooltip="Central de documentação"><?php echo iconSvg('book-open'); ?></a>
+            <div class="export-menu" id="exportMenu">
+                <button type="button" id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" aria-expanded="false"><?php echo iconSvg('download'); ?></button>
+                <div class="export-menu-list" role="menu" aria-labelledby="exportChatBtn">
+                    <a id="exportMarkdownLink" class="export-menu-item" role="menuitem" href="index.php?action=export_md&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file-text'); ?><span>Exportar como .md</span></a>
+                    <a id="exportPdfLink" class="export-menu-item" role="menuitem" href="index.php?action=export_pdf&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file'); ?><span>Exportar como .pdf</span></a>
+                </div>
+            </div>
             <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
             <button type="button" id="newChatBtn" class="new-chat-btn">+ Nova conversa</button>
         </div>

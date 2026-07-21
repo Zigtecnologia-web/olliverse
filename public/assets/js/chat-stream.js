@@ -1,8 +1,11 @@
 async function streamAssistantResponse(response, assistantMessage, onChunk, onPayload) {
     if (!response.body || !window.TextDecoder) {
         const text = await response.text();
+        let fullText = '';
 
-        processNdjsonBuffer(text, onChunk, onPayload, assistantMessage);
+        processNdjsonBuffer(text, (content) => {
+            fullText = appendStreamingAssistantContent(assistantMessage, content, onChunk, fullText);
+        }, onPayload);
         return;
     }
 
@@ -26,11 +29,8 @@ async function streamAssistantResponse(response, assistantMessage, onChunk, onPa
 
         buffer += chunk;
         buffer = processNdjsonBuffer(buffer, (content) => {
-            fullText += content;
-            onChunk(content);
-            renderAssistantMessageContent(assistantMessage.message, fullText);
-        }, onPayload, assistantMessage);
-        scrollToBottom();
+            fullText = appendStreamingAssistantContent(assistantMessage, content, onChunk, fullText);
+        }, onPayload);
     }
 
     const finalChunk = decoder.decode();
@@ -41,11 +41,23 @@ async function streamAssistantResponse(response, assistantMessage, onChunk, onPa
 
     if (buffer.trim() !== '') {
         processNdjsonLine(buffer.trim(), (content) => {
-            fullText += content;
-            onChunk(content);
-            renderAssistantMessageContent(assistantMessage.message, fullText);
+            fullText = appendStreamingAssistantContent(assistantMessage, content, onChunk, fullText);
         }, onPayload);
     }
+}
+
+function appendStreamingAssistantContent(assistantMessage, content, onChunk, currentText = '') {
+    const shouldStickToBottom = shouldScrollToBottom();
+    const nextText = currentText + content;
+
+    onChunk(content);
+    renderAssistantMessageContent(assistantMessage.message, nextText);
+
+    if (shouldStickToBottom) {
+        scrollToBottom();
+    }
+
+    return nextText;
 }
 
 function processNdjsonBuffer(buffer, onChunk, onPayload) {

@@ -2,12 +2,15 @@
     "name": "olliverse/local-chat",
     "description": "Cliente de chat local para Ollama em PHP puro.",
     "type": "project",
+    "license": "proprietary",
     "autoload": {
         "psr-4": {
             "App\\": "app/"
         }
     },
     "require": {
-        "php": ">=8.2"
+        "php": ">=8.2",
+        "dompdf/dompdf": "^3.1",
+        "erusev/parsedown": "^1.8"
     }
 }

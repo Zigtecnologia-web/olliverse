@@ -11,9 +11,11 @@ use App\Repositories\SqliteConversationRepository;
 use App\Repositories\SqlitePersonaRepository;
 use App\Repositories\SqliteSearchRepository;
 use App\Services\ContextWindowService;
+use App\Services\DocumentationService;
 use App\Services\ModelMetadataService;
 use App\Services\ModelSelector;
 use App\Services\OllamaClient;
+use App\Services\PdfExportService;
 use App\Services\PromptGeneratorService;
 use App\Services\RagIngestionService;
 use App\Services\RagRetrievalService;
@@ -40,6 +42,15 @@ $ragRetrievalService = $app['rag_retrieval_service'];
 /** @var \PDO $pdo */
 $pdo = $app['pdo'];
 
+if (($_GET['view'] ?? '') === 'docs') {
+    $documentationService = new DocumentationService(__DIR__ . '/Doc/README.md');
+    $documentationHtml = $documentationService->html();
+    $returnChatId = (int) ($_GET['chat_id'] ?? 0);
+
+    require __DIR__ . '/views/documentation.php';
+    exit;
+}
+
 $availableModels = $ollamaClient->listModels();
 $defaultModel = ModelSelector::defaultModel($availableModels, $config->preferredModels);
 $personaRepository = new SqlitePersonaRepository($pdo, $config->defaultSystemPrompt);
@@ -65,7 +76,7 @@ if (($_GET['action'] ?? '') === 'search') {
     ]);
 }
 
-if (($_GET['action'] ?? '') === 'export') {
+if (in_array(($_GET['action'] ?? ''), ['export', 'export_md'], true)) {
     $exportChatId = (int) ($_GET['chat_id'] ?? 0);
     $exportRepository = new SqliteChatExportRepository($pdo);
     $payload = $exportRepository->markdownPayload($exportChatId);
@@ -79,6 +90,25 @@ if (($_GET['action'] ?? '') === 'export') {
     header('Content-Type: text/markdown; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $exportRepository->filename($payload['chat']) . '"');
     echo $exportRepository->toMarkdown($payload);
+    exit;
+}
+
+if (($_GET['action'] ?? '') === 'export_pdf') {
+    $exportChatId = (int) ($_GET['chat_id'] ?? 0);
+    $exportRepository = new SqliteChatExportRepository($pdo);
+    $payload = $exportRepository->markdownPayload($exportChatId);
+
+    if ($payload === null) {
+        http_response_code(404);
+        echo 'Conversa não encontrada.';
+        exit;
+    }
+
+    $pdfExportService = new PdfExportService(__DIR__ . '/views/pdf/chat_template.php');
+
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $pdfExportService->filename($payload['chat']) . '"');
+    echo $pdfExportService->render($payload);
     exit;
 }
 

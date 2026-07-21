@@ -49,13 +49,17 @@ function renderPersistedAssistantMessages() {
 }
 
 function finalizeStreamingAssistantMessage(assistantMessage, text) {
+    const shouldStickToBottom = shouldScrollToBottom();
+
     renderAssistantMessageContent(assistantMessage.message, text);
 
     if (text.trim() !== '') {
         appendCopyResponseButton(assistantMessage.group, text);
     }
 
-    scrollToBottom();
+    if (shouldStickToBottom) {
+        scrollToBottom();
+    }
 }
 
 function appendRagSources(messageGroup, sources) {
@@ -71,10 +75,15 @@ function appendRagSources(messageGroup, sources) {
         return;
     }
 
+    const shouldStickToBottom = shouldScrollToBottom();
     const sourceInfo = document.createElement('div');
     sourceInfo.className = 'rag-source-info';
     sourceInfo.textContent = `Baseado em: ${sourceNames.join(', ')}`;
     messageGroup.appendChild(sourceInfo);
+
+    if (shouldStickToBottom) {
+        scrollToBottom();
+    }
 }
 
 function renderUserMessage(messageGroup, messageDiv, text) {
@@ -371,6 +380,8 @@ function iconSvg(name) {
         check: '<path d="M20 6 9 17l-5-5"></path>',
         download: '<path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path>',
         ellipsis: '<circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle>',
+        file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path>',
+        'file-text': '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path>',
         'refresh-cw': '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 16h5v5"></path>',
         'trash-2': '<path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>'
     };
@@ -691,5 +702,23 @@ function escapeHtml(text) {
 
 function scrollToBottom() {
     const container = document.getElementById('chatMessages');
+
+    if (!container) {
+        return;
+    }
+
     container.scrollTop = container.scrollHeight;
+}
+
+function shouldScrollToBottom() {
+    const container = document.getElementById('chatMessages');
+    const threshold = 100;
+
+    if (!container) {
+        return true;
+    }
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    return distanceToBottom <= threshold;
 }

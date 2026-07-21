@@ -116,7 +116,6 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
         inputEl.focus();
-        scrollToBottom();
     });
 });
 
@@ -178,6 +177,7 @@ document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {
         closeModelMenu();
         closeHistoryMenus();
+        closeExportMenu();
     }
 });
 

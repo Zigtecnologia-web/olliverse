@@ -3,6 +3,15 @@ function initHistoryPanel() {
     updateExportLink();
     setHistoryOpen(Boolean(window.OlliverseState.historyOpen));
 
+    document.getElementById('exportChatBtn').addEventListener('click', function(event) {
+        event.stopPropagation();
+        toggleExportMenu();
+    });
+    document.getElementById('exportMarkdownLink').addEventListener('click', closeExportMenu);
+    document.getElementById('exportPdfLink').addEventListener('click', function() {
+        closeExportMenu();
+        markPdfExportLoading(this);
+    });
     document.getElementById('historyToggleBtn').addEventListener('click', function() {
         setHistoryOpen(true);
     });
@@ -23,6 +32,10 @@ function initHistoryPanel() {
     document.addEventListener('click', function(event) {
         if (!event.target.closest('.history-chat-actions')) {
             closeHistoryMenus();
+        }
+
+        if (!event.target.closest('.export-menu')) {
+            closeExportMenu();
         }
     });
 }
@@ -194,7 +207,8 @@ function createHistoryChatItem(chat) {
     const actions = document.createElement('div');
     const menuButton = document.createElement('button');
     const menu = document.createElement('div');
-    const downloadLink = document.createElement('a');
+    const markdownLink = document.createElement('a');
+    const pdfLink = document.createElement('a');
     const deleteButton = document.createElement('button');
     const title = document.createElement('span');
     const model = document.createElement('span');
@@ -233,11 +247,18 @@ function createHistoryChatItem(chat) {
     });
 
     menu.className = 'history-action-menu';
-    downloadLink.className = 'history-action-menu-item';
-    downloadLink.href = `${window.location.pathname}?action=export&chat_id=${Number(chat.id)}`;
-    downloadLink.innerHTML = `${iconSvg('download')}<span>Download</span>`;
-    downloadLink.addEventListener('click', function() {
+    markdownLink.className = 'history-action-menu-item';
+    markdownLink.href = `${window.location.pathname}?action=export_md&chat_id=${Number(chat.id)}`;
+    markdownLink.innerHTML = `${iconSvg('file-text')}<span>Exportar .md</span>`;
+    markdownLink.addEventListener('click', function() {
         closeHistoryMenus();
+    });
+    pdfLink.className = 'history-action-menu-item';
+    pdfLink.href = `${window.location.pathname}?action=export_pdf&chat_id=${Number(chat.id)}`;
+    pdfLink.innerHTML = `${iconSvg('file')}<span>Exportar .pdf</span>`;
+    pdfLink.addEventListener('click', function() {
+        closeHistoryMenus();
+        markPdfExportLoading(this);
     });
 
     deleteButton.type = 'button';
@@ -248,7 +269,8 @@ function createHistoryChatItem(chat) {
         closeHistoryMenus();
         openDeleteChatModal(chat);
     });
-    menu.appendChild(downloadLink);
+    menu.appendChild(markdownLink);
+    menu.appendChild(pdfLink);
     menu.appendChild(deleteButton);
     actions.appendChild(menuButton);
     actions.appendChild(menu);
@@ -275,6 +297,36 @@ function closeHistoryMenus() {
         actions.classList.remove('open');
         actions.querySelector('.history-menu-btn')?.setAttribute('aria-expanded', 'false');
     });
+}
+
+function toggleExportMenu() {
+    const exportMenu = document.getElementById('exportMenu');
+    const exportButton = document.getElementById('exportChatBtn');
+    const shouldOpen = !exportMenu.classList.contains('open');
+
+    exportMenu.classList.toggle('open', shouldOpen);
+    exportButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function closeExportMenu() {
+    const exportMenu = document.getElementById('exportMenu');
+    const exportButton = document.getElementById('exportChatBtn');
+
+    if (!exportMenu || !exportButton) {
+        return;
+    }
+
+    exportMenu.classList.remove('open');
+    exportButton.setAttribute('aria-expanded', 'false');
+}
+
+function markPdfExportLoading(link) {
+    link.classList.add('loading');
+    link.setAttribute('aria-disabled', 'true');
+    window.setTimeout(() => {
+        link.classList.remove('loading');
+        link.removeAttribute('aria-disabled');
+    }, 3000);
 }
 
 function openDeleteChatModal(chat) {
@@ -425,10 +477,16 @@ function renderLoadedChatMessages(messages) {
 
 function updateExportLink() {
     const exportButton = document.getElementById('exportChatBtn');
+    const markdownLink = document.getElementById('exportMarkdownLink');
+    const pdfLink = document.getElementById('exportPdfLink');
     const chatId = Number(window.OlliverseConfig.chatId || 0);
 
-    exportButton.href = `${window.location.pathname}?action=export&chat_id=${chatId}`;
+    markdownLink.href = `${window.location.pathname}?action=export_md&chat_id=${chatId}`;
+    pdfLink.href = `${window.location.pathname}?action=export_pdf&chat_id=${chatId}`;
     exportButton.classList.toggle('disabled', chatId <= 0);
+    exportButton.disabled = chatId <= 0;
+    markdownLink.classList.toggle('disabled', chatId <= 0);
+    pdfLink.classList.toggle('disabled', chatId <= 0);
 }
 
 function setHistoryStatus(message, isError = false) {

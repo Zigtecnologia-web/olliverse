@@ -2,7 +2,7 @@
 
 - **Criado por:** Valdiney França
 - **Data de criacao:** 19 de julho de 2026
-- **Ultima atualizacao:** 20 de julho de 2026
+- **Ultima atualizacao:** 21 de julho de 2026
 
 ## 1. Visao geral
 
@@ -19,6 +19,7 @@ Em termos praticos, a ferramenta funciona como um cliente web local para Ollama,
 - controlar o tamanho do contexto enviado ao modelo;
 - entregar respostas em streaming para a interface;
 - renderizar respostas em Markdown com suporte a blocos de codigo.
+- disponibilizar uma Central de Documentacao dentro da propria aplicacao.
 
 ## 2. Tipo de ferramenta que esta sendo construida
 
@@ -41,10 +42,13 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 
 - PHP `>= 8.2`.
 - PHP puro, sem framework.
-- Autoload PSR-4 simples registrado em `bootstrap/app.php`.
+- Autoload Composer carregado em `bootstrap/app.php`, com fallback PSR-4 simples para classes `App\`.
 - cURL para comunicacao com Ollama.
 - PDO para SQLite.
 - Classes com `declare(strict_types=1)`.
+- Dependencias Composer:
+  - `dompdf/dompdf` para gerar PDF;
+  - `erusev/parsedown` para converter Markdown em HTML no template de PDF.
 
 ### Frontend
 
@@ -612,6 +616,24 @@ the input length exceeds the context length
 
 Esse erro acontece quando um trecho enviado ao modelo ficou maior que a janela de contexto permitida pelo modelo de embeddings.
 
+### 8.22 Central de Documentacao
+
+A aplicacao possui uma Central de Documentacao acessivel pelo botao de livro no menu principal do chat.
+
+Essa tela apresenta o conteudo de `Doc/README.md` dentro da propria interface do Olliverse, com navegacao lateral para secoes principais.
+
+Fluxo:
+
+1. o usuario clica no botao **Central de documentacao** no header;
+2. o frontend abre `index.php?view=docs&chat_id=ID`;
+3. o backend le `Doc/README.md`;
+4. o Markdown e convertido para HTML pelo `DocumentationService`;
+5. os titulos recebem ancoras estaveis para a navegacao lateral;
+6. a view `views/documentation.php` renderiza a central;
+7. o botao **Voltar ao chat** retorna para a conversa atual quando `chat_id` foi informado.
+
+O arquivo `Doc/README.md` continua sendo a fonte canonica da documentacao funcional e tecnica.
+
 ## 9. Contratos HTTP atuais
 
 ### 9.1 Abrir chat
@@ -659,7 +681,23 @@ Resposta esperada:
 
 Campos podem vir como `null` quando o dado nao for encontrado.
 
-### 9.5 Enviar mensagem ao chat
+### 9.5 Exportar conversa em Markdown
+
+```http
+GET /index.php?action=export_md&chat_id=1
+```
+
+Retorna download `text/markdown` com o historico da conversa. O endpoint antigo `action=export` continua funcionando como alias para Markdown.
+
+### 9.6 Exportar conversa em PDF
+
+```http
+GET /index.php?action=export_pdf&chat_id=1
+```
+
+Retorna download `application/pdf` gerado com Dompdf. O conteudo das mensagens passa por Parsedown em modo seguro e e renderizado no template `views/pdf/chat_template.php`.
+
+### 9.7 Enviar mensagem ao chat
 
 ```http
 POST /index.php?chat_id=1
@@ -682,7 +720,7 @@ Linhas possiveis:
 {"type":"error","message":"erro amigavel","context_reset":false}
 ```
 
-### 9.6 Selecionar persona
+### 9.8 Selecionar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -702,7 +740,7 @@ Resposta:
 }
 ```
 
-### 9.7 Criar persona
+### 9.9 Criar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -713,7 +751,7 @@ persona_action=create&name=Nome&description=Descricao&prompt_content=Prompt
 
 Cria a persona e a define como ativa no chat atual.
 
-### 9.8 Atualizar persona
+### 9.10 Atualizar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -724,7 +762,7 @@ persona_action=update&persona_id=2&name=Nome&description=Descricao&prompt_conten
 
 Atualiza a persona. Se ela for a persona ativa do chat atual, o chat passa a usar o prompt atualizado.
 
-### 9.9 Excluir persona
+### 9.11 Excluir persona
 
 ```http
 POST /index.php?chat_id=1
@@ -735,7 +773,7 @@ persona_action=delete&persona_id=2
 
 Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a persona fallback.
 
-### 9.10 Gerar system prompt de persona com IA
+### 9.12 Gerar system prompt de persona com IA
 
 ```http
 POST /index.php?chat_id=1&action=prompt_generate
@@ -771,7 +809,7 @@ Erros retornam JSON com status `422`:
 }
 ```
 
-### 9.11 Atualizar system prompt diretamente
+### 9.13 Atualizar system prompt diretamente
 
 ```http
 POST /index.php?chat_id=1
@@ -781,6 +819,16 @@ system_prompt=Novo%20prompt
 ```
 
 Este endpoint ainda existe. No comportamento atual, ele cria uma **Persona personalizada** a partir do prompt informado e associa essa persona ao chat.
+
+### 9.14 Abrir Central de Documentacao
+
+```http
+GET /index.php?view=docs&chat_id=1
+```
+
+Renderiza a Central de Documentacao com o conteudo de `Doc/README.md`.
+
+O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 
 ## 10. Modelo de dados
 
@@ -914,6 +962,28 @@ Faz:
 - extrair YAML puro da resposta, incluindo respostas envolvidas em code fence;
 - validar as chaves obrigatorias `name`, `role`, `persona_traits`, `skills` e `directives`.
 
+### `App\Services\PdfExportService`
+
+Responsavel por gerar o PDF de uma conversa.
+
+Faz:
+
+- converter conteudo Markdown das mensagens com Parsedown em modo seguro;
+- carregar `views/pdf/chat_template.php`;
+- configurar Dompdf para pagina A4;
+- devolver o binario usado pelo endpoint `action=export_pdf`.
+
+### `App\Services\DocumentationService`
+
+Responsavel por carregar a documentacao do projeto.
+
+Faz:
+
+- ler `Doc/README.md`;
+- converter Markdown para HTML com Parsedown em modo seguro;
+- gerar IDs para os titulos principais;
+- usar fallback em texto escapado quando Parsedown nao estiver disponivel.
+
 ### `App\Services\ContextWindowService`
 
 Responsavel por:
@@ -1035,6 +1105,16 @@ Faz:
 - injetar o YAML gerado no campo `System prompt`;
 - sincronizar estado global do frontend.
 
+### `views/documentation.php`
+
+Renderiza a Central de Documentacao.
+
+Faz:
+
+- exibir o conteudo do manual dentro do app;
+- oferecer navegacao lateral para secoes principais;
+- manter um link de retorno para o chat atual.
+
 ## 13. Estado global no frontend
 
 `views/chat.php` injeta configuracoes iniciais em `window.OlliverseConfig`:
@@ -1107,7 +1187,7 @@ As specs em `IA/Specs` indicam evolucoes desejadas.
 - Busca no historico.
 - Full-Text Search com SQLite FTS5.
 - Arquivamento de conversas.
-- Exportacao de chat para JSON ou Markdown.
+- Exportacao de chat para JSON.
 - Melhorias avancadas de RAG, como filtros por documento e remocao visual de fontes.
 - Metadados de modelos mais ricos.
 - Titulo gerado por IA ou editavel pelo usuario.
@@ -1230,9 +1310,12 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Exibe toast de troca de persona.
 - [x] Copia resposta do assistente.
 - [x] Reusa pergunta do usuario.
+- [x] Exporta conversa em Markdown.
+- [x] Exporta conversa em PDF.
 - [x] Possui layout responsivo basico.
 - [x] Indexa documentos de texto para RAG local.
 - [x] Usa documentos indexados como contexto opcional no chat.
+- [x] Exibe a Central de Documentacao pelo menu principal.
 
 ## 20. Resumo executivo
 
