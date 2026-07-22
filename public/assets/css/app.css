@@ -10,7 +10,7 @@ body {
     color: #e1e1e6;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     height: 100vh;
     padding: 20px;
 }
@@ -27,7 +27,8 @@ body.documentation-body {
     display: grid;
     gap: 16px;
     grid-template-columns: 300px minmax(0, 1100px);
-    height: 85vh;
+    height: calc(100vh - 45px);
+    margin-top: 5px;
     max-width: 1420px;
     width: 100%;
 }
@@ -747,7 +748,7 @@ a.history-action-menu-item {
     transform: translate(-50%, 4px);
     transition: opacity 0.18s, transform 0.18s;
     white-space: nowrap;
-    z-index: 50;
+    z-index: 9998;
 }
 
 .model-info-btn::before,
@@ -763,7 +764,7 @@ a.history-action-menu-item {
     position: absolute;
     transform: translate(-50%, 4px);
     transition: opacity 0.18s, transform 0.18s;
-    z-index: 51;
+    z-index: 9999;
 }
 
 .model-info-btn:hover::after,
@@ -871,16 +872,26 @@ a.history-action-menu-item {
 }
 
 .new-chat-btn {
+    align-items: center;
     background: transparent;
-    color: #e1e1e6;
     border: 1px solid #3f3f46;
-    padding: 8px 12px;
     border-radius: 6px;
+    color: #e1e1e6;
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 36px;
     font-size: 0.85rem;
     font-weight: 600;
-    cursor: pointer;
+    height: 36px;
+    justify-content: center;
+    padding: 0;
     transition: border-color 0.2s, color 0.2s, background-color 0.2s;
-    white-space: nowrap;
+    width: 36px;
+}
+
+.new-chat-btn svg {
+    height: 18px;
+    width: 18px;
 }
 
 .new-chat-btn:hover,
@@ -1063,22 +1074,39 @@ a.history-action-menu-item {
     align-items: center;
     display: flex;
     gap: 8px;
+    flex: 0 1 260px;
+    min-width: 0;
 }
 
 .rag-file-input {
     display: none;
 }
 
-.rag-upload-form .secondary-config-btn,
-.rag-upload-form .save-config-btn {
-    font-size: 0.8rem;
-    padding: 8px 10px;
+.rag-upload-form .rag-add-document-btn {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 30px;
+    height: 30px;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0;
+    width: 30px;
+}
+
+.rag-add-document-btn svg {
+    height: 20px;
+    width: 20px;
 }
 
 .rag-status {
     color: #04d361;
+    flex: 1;
     font-size: 0.78rem;
     min-height: 1rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rag-status.error {
@@ -2141,7 +2169,7 @@ a.config-btn {
     }
 
     .new-chat-btn {
-        width: 100%;
+        width: 36px;
     }
 
     .header-actions {
@@ -2149,10 +2177,14 @@ a.config-btn {
         width: 100%;
     }
 
-    .rag-panel-main,
-    .rag-upload-form {
+    .rag-panel-main {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .rag-upload-form {
+        flex: 0 1 auto;
+        width: 100%;
     }
 
     .rag-document-chip,

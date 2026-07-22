@@ -165,6 +165,47 @@ final readonly class SqliteDocumentChunkRepository
         return array_slice($rankedChunks, 0, $limit);
     }
 
+    /**
+     * @param array<int, int> $documentIds
+     * @return array<int, array{id: int, document_id: int, source_name: string, content: string, token_count: int}>
+     */
+    public function sampleChunks(int $limit = 8, array $documentIds = []): array
+    {
+        $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
+        $limit = max(1, min(20, $limit));
+        $sql = 'SELECT id, document_id, source_name, content, token_count
+                FROM document_chunks
+                WHERE document_id IS NOT NULL';
+        $params = [];
+
+        if ($documentIds !== []) {
+            $placeholders = [];
+
+            foreach ($documentIds as $index => $documentId) {
+                $parameterName = ':document_id_' . $index;
+                $placeholders[] = $parameterName;
+                $params[$parameterName] = $documentId;
+            }
+
+            $sql .= ' AND document_id IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        $sql .= ' ORDER BY document_id ASC, id ASC LIMIT ' . $limit;
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute($params);
+
+        return array_map(
+            static fn (array $chunk): array => [
+                'id' => (int) $chunk['id'],
+                'document_id' => (int) $chunk['document_id'],
+                'source_name' => (string) $chunk['source_name'],
+                'content' => (string) $chunk['content'],
+                'token_count' => (int) $chunk['token_count'],
+            ],
+            $statement->fetchAll()
+        );
+    }
+
     private function findOrCreateDocument(string $sourceName): int
     {
         $statement = $this->pdo->prepare('SELECT id FROM rag_documents WHERE source_name = :source_name LIMIT 1');

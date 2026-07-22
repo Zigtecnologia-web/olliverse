@@ -2,6 +2,15 @@
     window.OlliversePlugins = window.OlliversePlugins || {};
 
     window.OlliversePlugins.data_analyst = {
+        activate() {
+            ensureInsightsPanel();
+            scheduleInsightsInspection();
+        },
+
+        deactivate() {
+            document.getElementById('dataInsightsPanel')?.remove();
+        },
+
         processMessage(messageElement) {
             if (!messageElement || !window.Chart) {
                 return;
@@ -11,7 +20,206 @@
                 renderChartBlock(block);
             });
         },
+
+        renderInsights(containerElement, inspectionJson, sources) {
+            renderInsights(containerElement, inspectionJson, sources);
+        },
     };
+
+    ensureInsightsPanel();
+    scheduleInsightsInspection();
+    document.addEventListener('change', (event) => {
+        if (!isDataAnalystActive()) {
+            return;
+        }
+
+        if (event.target?.matches?.('#ragAllDocuments, .rag-document-checkbox')) {
+            scheduleInsightsInspection();
+        }
+    });
+    document.addEventListener('olliverse:rag-documents-rendered', () => {
+        if (isDataAnalystActive()) {
+            scheduleInsightsInspection();
+        }
+    });
+
+    function ensureInsightsPanel() {
+        const chatMessages = document.getElementById('chatMessages');
+
+        if (!chatMessages || document.getElementById('dataInsightsPanel')) {
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'dataInsightsPanel';
+        panel.className = 'data-insights-edge-panel';
+        panel.innerHTML = [
+            '<div id="dataInsightsStatus" class="data-insights-status" aria-live="polite"></div>',
+            '<div id="dataInsightsContent" class="data-insights-content"></div>',
+        ].join('');
+
+        chatMessages.parentElement.insertBefore(panel, chatMessages);
+    }
+
+    function scheduleInsightsInspection() {
+        window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
+        window.OlliversePlugins.data_analyst.inspectTimer = window.setTimeout(inspectSelectedRagDocuments, 350);
+    }
+
+    function inspectSelectedRagDocuments() {
+        ensureInsightsPanel();
+
+        const model = document.getElementById('modelSelect')?.value || '';
+        const body = new URLSearchParams({
+            model,
+            rag_all_documents: document.getElementById('ragAllDocuments')?.checked ? '1' : '0',
+        });
+        const selectedDocumentIds = selectedRagInsightDocumentIds();
+
+        if (!document.getElementById('ragAllDocuments')?.checked && selectedDocumentIds.length === 0) {
+            clearInsightsContent();
+            setInsightsStatus('Selecione um documento RAG para gerar sugestoes analiticas.', false);
+            return;
+        }
+
+        selectedDocumentIds.forEach((documentId) => {
+            body.append('rag_document_ids[]', String(documentId));
+        });
+
+        setInsightsStatus('Inspecionando documento RAG...', false);
+
+        fetch(`${window.location.pathname}?action=data_insights`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+        })
+        .then((response) => response.json().then((payload) => ({ ok: response.ok, payload })))
+        .then(({ ok, payload }) => {
+            if (!ok || !payload.success) {
+                throw new Error(payload.error || 'Nao foi possivel inspecionar os dados.');
+            }
+
+            renderInsightsPanel(payload.inspection, payload.sources || []);
+            setInsightsStatus('', false);
+        })
+        .catch((error) => {
+            clearInsightsContent();
+            setInsightsStatus(error.message || 'Nao foi possivel inspecionar os dados.', true);
+        });
+    }
+
+    function renderInsightsPanel(inspection, sources) {
+        const content = document.getElementById('dataInsightsContent');
+        const insightsContainer = createInsightsContainer();
+
+        if (!content) {
+            return;
+        }
+
+        content.innerHTML = '';
+        content.appendChild(insightsContainer);
+        renderInsights(insightsContainer, inspection, sources);
+    }
+
+    function createInsightsContainer() {
+        const container = document.createElement('div');
+        container.className = 'data-insights-container';
+        container.innerHTML = [
+            '<div class="insights-header">',
+            '<span class="insights-icon" aria-hidden="true">Data</span>',
+            '<div class="insights-text">',
+            '<strong>Analise inteligente (SQLite / RAG)</strong>',
+            '<p class="insights-summary-text"></p>',
+            '</div>',
+            '</div>',
+            '<div class="insights-chips-wrapper">',
+            '<span class="chips-label">Sugestoes de exploracao para este documento:</span>',
+            '<div class="dynamic-chips-container"></div>',
+            '</div>',
+        ].join('');
+
+        return container;
+    }
+
+    function renderInsights(containerElement, inspectionJson, sources) {
+        const summary = containerElement.querySelector('.insights-summary-text');
+        const chipsContainer = containerElement.querySelector('.dynamic-chips-container');
+        const sourceLabel = Array.isArray(sources) && sources.length ? `${sources.join(', ')}: ` : '';
+
+        summary.textContent = `${sourceLabel}${inspectionJson.summary || 'Dados estruturados prontos para explorar.'}`;
+        chipsContainer.innerHTML = '';
+
+        (inspectionJson.suggestions || []).forEach((item) => {
+            const button = document.createElement('button');
+            const chartType = item.chart_type || 'bar';
+
+            button.type = 'button';
+            button.className = 'insight-chip-btn';
+            button.textContent = item.title || 'Explorar dados';
+            button.addEventListener('click', () => {
+                const query = buildInsightQuery(item.query || button.textContent, chartType);
+
+                enableRagForInsight();
+
+                if (typeof window.OlliverseSubmitMessage === 'function') {
+                    window.OlliverseSubmitMessage(query);
+                }
+            });
+
+            chipsContainer.appendChild(button);
+        });
+    }
+
+    function buildInsightQuery(query, chartType) {
+        return [
+            query,
+            '',
+            `Use os documentos selecionados no RAG e gere um grafico do tipo ${chartType} em um bloco json-chart.`,
+        ].join('\n');
+    }
+
+    function selectedRagInsightDocumentIds() {
+        if (typeof getSelectedRagDocumentIds === 'function') {
+            return getSelectedRagDocumentIds();
+        }
+
+        return Array.from(document.querySelectorAll('.rag-document-checkbox:checked'))
+            .map((checkbox) => Number(checkbox.value))
+            .filter((documentId) => documentId > 0);
+    }
+
+    function enableRagForInsight() {
+        const ragToggle = document.getElementById('ragToggle');
+
+        if (ragToggle) {
+            ragToggle.checked = true;
+        }
+    }
+
+    function clearInsightsContent() {
+        const content = document.getElementById('dataInsightsContent');
+
+        if (content) {
+            content.innerHTML = '';
+        }
+    }
+
+    function isDataAnalystActive() {
+        return window.OlliversePlugins?.active?.has?.('data_analyst') !== false;
+    }
+
+    function setInsightsStatus(message, error) {
+        const status = document.getElementById('dataInsightsStatus');
+
+        if (!status) {
+            return;
+        }
+
+        status.textContent = message;
+        status.classList.toggle('error', error);
+    }
 
     function renderChartBlock(block) {
         const host = block.closest('.code-block') || block.closest('pre');
@@ -43,6 +251,10 @@
 
         const chart = new Chart(canvas.getContext('2d'), chartOptions(payload));
 
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(downloadButton);
+        }
+
         downloadButton.addEventListener('click', function() {
             downloadChartImage(chart, payload);
         });
@@ -60,7 +272,7 @@
             '<canvas class="dynamic-chart-canvas"></canvas>',
             '</div>',
             '<div class="chart-footer">',
-            '<button type="button" class="chart-download-btn">Baixar imagem</button>',
+            `<button type="button" class="chart-download-btn" aria-label="Baixar imagem" title="Baixar imagem" data-tooltip="Baixar imagem">${iconSvg('download')}</button>`,
             '</div>',
         ].join('');
 

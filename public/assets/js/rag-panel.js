@@ -5,6 +5,10 @@ function initRagPanel() {
     const fileInput = document.getElementById('ragFileInput');
     const pickFileBtn = document.getElementById('ragPickFileBtn');
 
+    if (typeof attachActionTooltip === 'function') {
+        attachActionTooltip(pickFileBtn);
+    }
+
     pickFileBtn.addEventListener('click', function() {
         fileInput.click();
     });
@@ -129,18 +133,28 @@ function deleteRagDocument(documentId, sourceName) {
 
 function renderRagDocuments(documents) {
     const container = document.getElementById('ragDocumentList');
+    const ragToggleField = document.querySelector('.rag-toggle-field');
+    const ragToggle = document.getElementById('ragToggle');
 
     if (!container) {
         return;
     }
 
     container.innerHTML = '';
+    if (ragToggleField) {
+        ragToggleField.hidden = !documents.length;
+    }
+
+    if (!documents.length && ragToggle) {
+        ragToggle.checked = false;
+    }
 
     if (!documents.length) {
         const empty = document.createElement('span');
         empty.className = 'rag-document-empty';
         empty.textContent = 'Nenhum documento adicionado';
         container.appendChild(empty);
+        document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
         return;
     }
 
@@ -178,6 +192,8 @@ function renderRagDocuments(documents) {
         item.appendChild(deleteButton);
         container.appendChild(item);
     });
+
+    document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
 }
 
 function createAllDocumentsChip() {

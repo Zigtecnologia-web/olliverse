@@ -12,9 +12,7 @@ initHistoryPanel();
 initRagPanel();
 initPluginPanel();
 
-document.getElementById('chatForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-
+function submitChatMessage(overridePrompt = null) {
     const inputEl = document.getElementById('userInput');
     const modelSelect = document.getElementById('modelSelect');
     const modelMenuButton = document.getElementById('modelMenuButton');
@@ -26,8 +24,7 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
     const ragPickFileBtn = document.getElementById('ragPickFileBtn');
     const ragUploadBtn = document.getElementById('ragUploadBtn');
     const ragAllDocuments = document.getElementById('ragAllDocuments');
-    const messagesContainer = document.getElementById('chatMessages');
-    const prompt = inputEl.value.trim();
+    const prompt = String(overridePrompt ?? inputEl.value).trim();
     const model = modelSelect.value;
     const ragEnabled = ragToggle?.checked ? '1' : '0';
     const body = new URLSearchParams({
@@ -118,18 +115,80 @@ document.getElementById('chatForm').addEventListener('submit', function(e) {
         newChatBtn.disabled = false;
         inputEl.focus();
     });
+}
+
+window.OlliverseSubmitMessage = submitChatMessage;
+
+document.getElementById('chatForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    submitChatMessage();
 });
 
-document.getElementById('newChatBtn').addEventListener('click', function() {
-    const chatId = window.OlliverseConfig.chatId;
-    const searchParams = new URLSearchParams({ new: '1' });
+const newChatButton = document.getElementById('newChatBtn');
+newChatButton.addEventListener('click', createNewChat);
+attachActionTooltip(newChatButton);
 
-    if (chatId) {
-        searchParams.set('chat_id', chatId);
-    }
+function createNewChat() {
+    const newChatBtn = document.getElementById('newChatBtn');
+    const inputEl = document.getElementById('userInput');
+    const modelSelect = document.getElementById('modelSelect');
+    const url = new URL(window.location.href);
+    const body = new URLSearchParams({
+        chat_id: String(window.OlliverseConfig.chatId || 0),
+        model: modelSelect.value || '',
+    });
 
-    window.location.href = `${window.location.pathname}?${searchParams.toString()}`;
-});
+    url.search = '';
+    url.searchParams.set('action', 'new_chat');
+    newChatBtn.disabled = true;
+
+    fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+        },
+        body: body.toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Erro ao criar conversa.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        const chatId = Number(payload.chat?.id || 0);
+
+        if (!chatId) {
+            throw new Error('A nova conversa não retornou um identificador válido.');
+        }
+
+        window.OlliverseConfig.chatId = chatId;
+        window.OlliverseConfig.activePersona = payload.active_persona || window.OlliverseConfig.activePersona;
+        window.OlliverseConfig.initialChatHistory = payload.chats || window.OlliverseConfig.initialChatHistory;
+        window.OlliverseState.historySearchQuery = '';
+        window.OlliverseState.historySearchChatIds = null;
+        window.clearTimeout(window.OlliverseState.historySearchTimer);
+        document.getElementById('historySearchInput').value = '';
+        renderLoadedChatMessages(payload.messages || []);
+        updateContextUsage(payload.context_usage);
+        renderPersonaSelect();
+        fillPersonaForm(Number(window.OlliverseConfig.activePersona.id));
+        updateExportLink();
+        renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
+        window.history.pushState({}, '', `${window.location.pathname}?chat_id=${chatId}`);
+        inputEl.value = '';
+        inputEl.focus();
+    })
+    .catch((error) => {
+        appendMessage(error.message || 'Erro ao criar conversa.', 'error');
+        console.error(error);
+    })
+    .finally(() => {
+        newChatBtn.disabled = false;
+    });
+}
 
 document.getElementById('modelInfoBtn').addEventListener('click', openModelInfoModal);
 document.getElementById('closeModelInfoModalBtn').addEventListener('click', closeModelInfoModal);

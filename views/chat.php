@@ -103,7 +103,7 @@
                 </div>
             </div>
             <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
-            <button type="button" id="newChatBtn" class="new-chat-btn">+ Nova conversa</button>
+            <button type="button" id="newChatBtn" class="new-chat-btn" aria-label="Nova conversa" title="Nova conversa" data-tooltip="Nova conversa"><?php echo iconSvg('plus'); ?></button>
         </div>
     </div>
 
@@ -116,13 +116,13 @@
                     <span class="toggle-label">Usar documentos</span>
                 </label>
             </div>
+            <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
+                <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,text/*">
+                <button type="button" id="ragPickFileBtn" class="secondary-config-btn rag-add-document-btn" aria-label="Adicionar documento" title="Adicionar documento" data-tooltip="Adicionar documento"><?php echo iconSvg('file-plus'); ?></button>
+                <span id="ragStatus" class="rag-status" aria-live="polite"></span>
+            </form>
             <div id="ragDocumentList" class="rag-document-list" aria-live="polite"></div>
         </div>
-        <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
-            <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,text/*">
-            <button type="button" id="ragPickFileBtn" class="secondary-config-btn">Adicionar documento</button>
-        </form>
-        <div id="ragStatus" class="rag-status" aria-live="polite"></div>
     </div>
 
     <div class="chat-messages" id="chatMessages">

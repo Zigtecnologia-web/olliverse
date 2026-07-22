@@ -42,14 +42,22 @@
 }
 
 .chart-download-btn {
+    align-items: center;
     background: transparent;
     border: 1px solid #3f3f46;
     border-radius: 6px;
     color: #e1e1e6;
     cursor: pointer;
-    font-size: 0.8rem;
-    font-weight: 700;
-    padding: 8px 10px;
+    display: inline-flex;
+    height: 34px;
+    justify-content: center;
+    padding: 0;
+    width: 34px;
+}
+
+.chart-download-btn svg {
+    height: 17px;
+    width: 17px;
 }
 
 .chart-download-btn:hover,
@@ -66,6 +74,109 @@
     padding: 12px;
 }
 
+.data-insights-edge-panel {
+    background-color: #18181d;
+    border-bottom: 1px solid #29292e;
+    display: grid;
+    gap: 8px;
+    padding: 10px 20px;
+}
+
+.insight-chip-btn {
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #e1e1e6;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.insight-chip-btn:hover,
+.insight-chip-btn:focus {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: #04d361;
+    color: #04d361;
+    outline: none;
+}
+
+.data-insights-status {
+    color: #7c7c8a;
+    font-size: 0.78rem;
+    min-height: 1rem;
+}
+
+.data-insights-status.error {
+    color: #f75a68;
+}
+
+.data-insights-container {
+    display: grid;
+    gap: 12px;
+    max-width: 960px;
+    min-width: 0;
+}
+
+.insights-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 10px;
+}
+
+.insights-icon {
+    background-color: rgba(4, 211, 97, 0.12);
+    border: 1px solid rgba(4, 211, 97, 0.36);
+    border-radius: 6px;
+    color: #04d361;
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 5px 7px;
+}
+
+.insights-text {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.insights-text strong {
+    color: #e1e1e6;
+    font-size: 0.9rem;
+}
+
+.insights-summary-text {
+    color: #a8a8b3;
+    font-size: 0.84rem;
+    line-height: 1.45;
+}
+
+.insights-chips-wrapper {
+    display: grid;
+    gap: 8px;
+}
+
+.chips-label {
+    color: #7c7c8a;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.dynamic-chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.insight-chip-btn {
+    max-width: 100%;
+    min-height: 32px;
+    overflow-wrap: anywhere;
+    padding: 7px 10px;
+    text-align: left;
+}
+
 @media (max-width: 560px) {
     .plugin-chart-wrapper {
         min-width: 0;
@@ -75,5 +186,17 @@
     .chart-canvas-container {
         height: 240px;
         padding: 10px;
+    }
+
+    .data-insights-edge-panel {
+        padding: 10px 14px;
+    }
+
+    .insight-chip-btn {
+        width: 100%;
+    }
+
+    .data-insights-container {
+        min-width: 0;
     }
 }

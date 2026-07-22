@@ -6,6 +6,6 @@
         <canvas class="dynamic-chart-canvas"></canvas>
     </div>
     <div class="chart-footer">
-        <button type="button" class="chart-download-btn">Baixar imagem</button>
+        <button type="button" class="chart-download-btn" aria-label="Baixar imagem" title="Baixar imagem" data-tooltip="Baixar imagem"><?php echo iconSvg('download'); ?></button>
     </div>
 </div>

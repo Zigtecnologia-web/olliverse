@@ -20,6 +20,20 @@ function initPluginPanel() {
             }
         });
     };
+    window.OlliversePlugins.activate = function(slug) {
+        const plugin = window.OlliversePlugins[slug];
+
+        if (plugin && typeof plugin.activate === 'function') {
+            plugin.activate();
+        }
+    };
+    window.OlliversePlugins.deactivate = function(slug) {
+        const plugin = window.OlliversePlugins[slug];
+
+        if (plugin && typeof plugin.deactivate === 'function') {
+            plugin.deactivate();
+        }
+    };
 
     menuButton.addEventListener('click', function() {
         const isOpen = menu.classList.toggle('open');
@@ -87,7 +101,10 @@ function togglePlugin(input, active) {
     })
     .then(() => {
         if (active) {
+            window.OlliversePlugins.activate(slug);
             processAllPluginMessages();
+        } else {
+            window.OlliversePlugins.deactivate(slug);
         }
 
         setPluginStatus(active ? 'Plugin ativado' : 'Plugin desativado');
@@ -166,6 +183,10 @@ function loadScript(src, slug) {
 }
 
 function processAllPluginMessages() {
+    window.OlliversePlugins.active.forEach((slug) => {
+        window.OlliversePlugins.activate(slug);
+    });
+
     document.querySelectorAll('.message.assistant').forEach((messageDiv) => {
         window.OlliversePlugins.processMessage(messageDiv);
     });

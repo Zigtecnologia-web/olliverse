@@ -642,6 +642,7 @@ Cada plugin pode ter:
 
 - `manifest.json` com metadados, dependencias e descricao;
 - `includes/prompt.php` com instrucao adicional para o system prompt;
+- `includes/inspect_prompt.php` e `includes/insights_view.php` para inspecao analitica baseada em RAG;
 - `assets/style.css` com estilos isolados;
 - `assets/script.js` com comportamento proprio do plugin.
 
@@ -659,7 +660,20 @@ Quando o plugin esta ligado:
 2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
 3. o frontend carrega Chart.js e os assets do plugin sob demanda;
 4. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
-5. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
+5. a selecao atual de documentos do RAG pode gerar sugestoes analiticas logo acima da conversa;
+6. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
+
+O fluxo de auto-inspecao usa `plugins/data_analyst/includes/inspect_prompt.php`.
+
+Quando o usuario seleciona documentos ja indexados no RAG com o plugin ativo:
+
+1. o frontend chama `POST /index.php?action=data_insights`;
+2. o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
+3. a resposta do modelo precisa conter um JSON com `summary` e `suggestions`;
+4. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
+5. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
+6. o frontend renderiza um painel com resumo e chips de sugestoes acima da conversa;
+7. cada chip ativa o uso de documentos e dispara uma pergunta normal do chat pedindo grafico `json-chart`.
 
 O prompt do plugin funciona como uma regra nativa de planejamento de grafico. Antes de gerar o bloco `json-chart`, o modelo deve inferir:
 
@@ -905,6 +919,36 @@ Resposta esperada:
 ```
 
 O estado e salvo na sessao PHP e passa a valer para as proximas mensagens enviadas ao modelo.
+
+### 9.16 Inspecionar dados para sugestoes analiticas
+
+```http
+POST /index.php?action=data_insights
+Content-Type: application/x-www-form-urlencoded
+
+model=llama3.2&rag_all_documents=0&rag_document_ids[]=12
+```
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "sources": ["alunos.csv"],
+  "inspection": {
+    "summary": "Base com registros de alunos, series e notas.",
+    "suggestions": [
+      {
+        "title": "Alunos por serie",
+        "query": "Gere um grafico por serie usando a quantidade de alunos.",
+        "chart_type": "bar"
+      }
+    ]
+  }
+}
+```
+
+O endpoint nao recebe upload novo. Ele usa os documentos ja indexados em `rag_documents` e `document_chunks`. Quando `rag_all_documents=1`, a amostra considera todos os documentos disponiveis; quando `rag_all_documents=0`, usa apenas os IDs enviados em `rag_document_ids[]`.
 
 O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 
@@ -1180,6 +1224,7 @@ Faz:
 - enviar `?action=plugin_toggle`;
 - atualizar `window.OlliverseConfig.plugins`;
 - carregar CSS, dependencias JS e script do plugin sob demanda;
+- chamar hooks opcionais `activate` e `deactivate` dos plugins;
 - reprocessar mensagens do assistente para renderizar blocos `json-chart` quando o plugin esta ativo.
 
 ### `public/assets/js/model-panel.js`
@@ -1412,6 +1457,7 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Exibe a Central de Documentacao pelo menu principal.
 - [x] Ativa/desativa plugins por sessao.
 - [x] Renderiza graficos via plugin `data_analyst` a partir de blocos `json-chart`.
+- [x] Inspeciona arquivos JSON/CSV e sugere consultas analiticas por chips.
 
 ## 20. Resumo executivo
 

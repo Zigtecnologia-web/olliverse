@@ -146,6 +146,41 @@ if (($_GET['action'] ?? '') === 'chat_data') {
     ]);
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'new_chat') {
+    try {
+        $currentChatId = (int) ($_POST['chat_id'] ?? 0);
+        $selectedModel = trim((string) ($_POST['model'] ?? $defaultModel));
+
+        if ($selectedModel === '' || ($availableModels && !in_array($selectedModel, $availableModels, true))) {
+            $selectedModel = $defaultModel;
+        }
+
+        $activePersona = $personaRepository->activeForChat($currentChatId);
+        $newChatId = SqliteConversationRepository::createChat(
+            $pdo,
+            $selectedModel,
+            (string) $activePersona['prompt_content'],
+            (int) $activePersona['id']
+        );
+
+        jsonResponse([
+            'success' => true,
+            'chat' => $chatHistoryRepository->find($newChatId),
+            'messages' => [],
+            'active_persona' => $personaRepository->activeForChat($newChatId),
+            'chats' => $chatHistoryRepository->all(),
+            'context_usage' => $contextWindowService->usage(
+                $contextWindowService->withSystemPrompt((string) $activePersona['prompt_content'], [])
+            ),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'delete_chat') {
     $deleteChatId = (int) ($_POST['chat_id'] ?? 0);
 
@@ -239,6 +274,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'plugin
             'success' => true,
             'plugins' => $pluginManager->all(),
             'active_plugins' => $pluginManager->activePlugins(),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'data_insights') {
+    try {
+        if (!$pluginManager->isActive('data_analyst')) {
+            throw new RuntimeException('Ative o plugin de Análise de Dados antes de inspecionar arquivos.');
+        }
+
+        $selectedModel = trim((string) ($_POST['model'] ?? $defaultModel));
+
+        if ($selectedModel === '' || ($availableModels && !in_array($selectedModel, $availableModels, true))) {
+            throw new RuntimeException('Modelo inválido ou indisponível no Ollama local.');
+        }
+
+        $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
+        $ragDocumentIds = selectedRagDocumentIds();
+        $sampleChunks = $documentChunkRepository->sampleChunks(8, $useAllRagDocuments ? [] : $ragDocumentIds);
+
+        if ($sampleChunks === []) {
+            unset($_SESSION['olliverse_data_analyst_rag_sample']);
+            throw new RuntimeException('Selecione pelo menos um documento RAG com conteúdo indexado.');
+        }
+
+        $sample = dataInsightRagSample($sampleChunks);
+        $inspectionPrompt = dataInsightInspectionPrompt(
+            dataInsightSourceNames($sampleChunks),
+            $sample
+        );
+        $rawInspection = $ollamaClient->generate($selectedModel, $inspectionPrompt);
+        $inspection = normalizeDataInsights($rawInspection);
+        $_SESSION['olliverse_data_analyst_rag_sample'] = [
+            'source_names' => dataInsightSourceNames($sampleChunks),
+            'sample' => $sample,
+        ];
+        unset($_SESSION['olliverse_data_analyst_dataset']);
+
+        jsonResponse([
+            'success' => true,
+            'sources' => dataInsightSourceNames($sampleChunks),
+            'inspection' => $inspection,
         ]);
     } catch (Throwable $error) {
         jsonResponse([
@@ -470,6 +552,154 @@ function uploadedRagFile(): array
         'name' => basename((string) ($file['name'] ?? 'documento.txt')),
         'content' => $content,
     ];
+}
+
+/**
+ * @param array<int, array{id: int, document_id: int, source_name: string, content: string, token_count: int}> $chunks
+ * @return array<int, string>
+ */
+function dataInsightSourceNames(array $chunks): array
+{
+    return array_values(array_unique(array_map(
+        static fn (array $chunk): string => (string) $chunk['source_name'],
+        $chunks
+    )));
+}
+
+/**
+ * @param array<int, array{id: int, document_id: int, source_name: string, content: string, token_count: int}> $chunks
+ */
+function dataInsightRagSample(array $chunks): string
+{
+    $sample = array_map(
+        static fn (array $chunk, int $index): string => sprintf(
+            "[Amostra %d | Documento %d | %s]\n%s",
+            $index + 1,
+            $chunk['document_id'],
+            $chunk['source_name'],
+            trim($chunk['content'])
+        ),
+        $chunks,
+        array_keys($chunks)
+    );
+
+    return substr(implode("\n\n---\n\n", $sample), 0, 12000);
+}
+
+/**
+ * @param array<int, string> $sourceNames
+ */
+function dataInsightInspectionPrompt(array $sourceNames, string $sample): string
+{
+    $promptPath = __DIR__ . '/plugins/data_analyst/includes/inspect_prompt.php';
+    $basePrompt = is_file($promptPath) ? require $promptPath : '';
+
+    return trim((string) $basePrompt) . "\n\n"
+        . "Documentos selecionados: " . implode(', ', $sourceNames) . "\n"
+        . "Amostra recuperada do SQLite/RAG:\n"
+        . "```text\n{$sample}\n```";
+}
+
+/**
+ * @return array{summary: string, suggestions: array<int, array{title: string, query: string, chart_type: string}>}
+ */
+function normalizeDataInsights(string $rawInspection): array
+{
+    $json = extractJsonObject($rawInspection);
+    $payload = json_decode($json, true);
+
+    if (!is_array($payload)) {
+        throw new RuntimeException('A inspeção retornou um JSON inválido.');
+    }
+
+    $summary = trim((string) ($payload['summary'] ?? ''));
+    $suggestions = $payload['suggestions'] ?? [];
+
+    if ($summary === '' || !is_array($suggestions)) {
+        throw new RuntimeException('A inspeção não trouxe resumo e sugestões válidas.');
+    }
+
+    $normalizedSuggestions = [];
+
+    foreach ($suggestions as $suggestion) {
+        if (!is_array($suggestion)) {
+            continue;
+        }
+
+        $title = trim((string) ($suggestion['title'] ?? ''));
+        $query = trim((string) ($suggestion['query'] ?? ''));
+        $chartType = trim((string) ($suggestion['chart_type'] ?? 'bar'));
+
+        if ($title === '' || $query === '' || !in_array($chartType, ['bar', 'pie', 'line'], true)) {
+            continue;
+        }
+
+        $normalizedSuggestions[] = [
+            'title' => $title,
+            'query' => $query,
+            'chart_type' => $chartType,
+        ];
+    }
+
+    if ($normalizedSuggestions === []) {
+        throw new RuntimeException('A inspeção não trouxe sugestões acionáveis.');
+    }
+
+    return [
+        'summary' => $summary,
+        'suggestions' => array_slice($normalizedSuggestions, 0, 4),
+    ];
+}
+
+function extractJsonObject(string $value): string
+{
+    $start = strpos($value, '{');
+
+    if ($start === false) {
+        return trim($value);
+    }
+
+    $depth = 0;
+    $inString = false;
+    $escaped = false;
+    $length = strlen($value);
+
+    for ($index = $start; $index < $length; $index++) {
+        $char = $value[$index];
+
+        if ($escaped) {
+            $escaped = false;
+            continue;
+        }
+
+        if ($char === '\\') {
+            $escaped = $inString;
+            continue;
+        }
+
+        if ($char === '"') {
+            $inString = !$inString;
+            continue;
+        }
+
+        if ($inString) {
+            continue;
+        }
+
+        if ($char === '{') {
+            $depth++;
+        }
+
+        if ($char === '}') {
+            $depth--;
+
+            if ($depth === 0) {
+                return substr($value, $start, $index - $start + 1);
+            }
+        }
+    }
+
+    return trim(substr($value, $start));
 }
 
 /**

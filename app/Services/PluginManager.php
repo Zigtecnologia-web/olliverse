@@ -76,6 +76,14 @@ final class PluginManager
             if (is_string($prompt) && trim($prompt) !== '') {
                 $prompts[] = trim($prompt);
             }
+
+            if ($slug === 'data_analyst') {
+                $datasetPrompt = $this->dataAnalystRagSamplePrompt();
+
+                if ($datasetPrompt !== '') {
+                    $prompts[] = $datasetPrompt;
+                }
+            }
         }
 
         return $prompts;
@@ -147,5 +155,33 @@ final class PluginManager
             'style' => is_file($this->pluginsPath . '/' . $slug . '/assets/style.css') ? $basePath . '/style.css' : null,
             'script' => is_file($this->pluginsPath . '/' . $slug . '/assets/script.js') ? $basePath . '/script.js' : null,
         ];
+    }
+
+    private function dataAnalystRagSamplePrompt(): string
+    {
+        $dataset = $_SESSION['olliverse_data_analyst_rag_sample'] ?? null;
+
+        if (!is_array($dataset)) {
+            return '';
+        }
+
+        $sourceNames = $dataset['source_names'] ?? [];
+        $sample = trim((string) ($dataset['sample'] ?? ''));
+
+        if (!is_array($sourceNames) || $sample === '') {
+            return '';
+        }
+
+        $sourceLabel = implode(', ', array_map(
+            static fn (mixed $sourceName): string => (string) $sourceName,
+            $sourceNames
+        ));
+
+        return trim(
+            "Base de dados selecionada via RAG/SQLite para analise:\n"
+            . "Documentos: {$sourceLabel}\n"
+            . "Amostra recuperada:\n"
+            . "```text\n{$sample}\n```"
+        );
     }
 }
