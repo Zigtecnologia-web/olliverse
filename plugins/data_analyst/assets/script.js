@@ -242,41 +242,124 @@
             return;
         }
 
-        const chartWrapper = createChartWrapper();
-        const canvas = chartWrapper.querySelector('.dynamic-chart-canvas');
+        const chartWrapper = createChartWrapper(payload);
         const downloadButton = chartWrapper.querySelector('.chart-download-btn');
 
         host.dataset.chartRendered = '1';
         host.replaceWith(chartWrapper);
 
-        const chart = new Chart(canvas.getContext('2d'), chartOptions(payload));
+        chartWrapper.dataset.rawPayload = JSON.stringify(payload);
+        initializeChartSwitcher(chartWrapper, payload);
 
         if (typeof attachActionTooltip === 'function') {
             attachActionTooltip(downloadButton);
         }
 
         downloadButton.addEventListener('click', function() {
+            const chart = chartWrapper._olliverseChartInstance;
+
+            if (!chart) {
+                return;
+            }
+
             downloadChartImage(chart, payload);
         });
     }
 
-    function createChartWrapper() {
+    function createChartWrapper(payload) {
         const wrapper = document.createElement('div');
 
         wrapper.className = 'plugin-chart-wrapper';
         wrapper.innerHTML = [
             '<div class="chart-header">',
-            '<span class="chart-badge">Relatório analítico gerado</span>',
+            `<span class="chart-badge">${escapeHtml(payload.title || 'Relatório analítico gerado')}</span>`,
+            '<div class="visual-switcher-toolbar" aria-label="Alternar visualizacao do grafico">',
+            `<button type="button" class="switcher-btn" data-chart-type="bar" aria-label="Grafico de barras" title="Grafico de barras" data-tooltip="Grafico de barras">${pluginIconSvg('bar-chart-3')}</button>`,
+            `<button type="button" class="switcher-btn" data-chart-type="pie" aria-label="Grafico de pizza" title="Grafico de pizza" data-tooltip="Grafico de pizza">${pluginIconSvg('pie-chart')}</button>`,
+            `<button type="button" class="switcher-btn" data-chart-type="line" aria-label="Grafico de linhas" title="Grafico de linhas" data-tooltip="Grafico de linhas">${pluginIconSvg('line-chart')}</button>`,
+            `<button type="button" class="switcher-btn" data-chart-type="table" aria-label="Visualizacao em tabela" title="Visualizacao em tabela" data-tooltip="Visualizacao em tabela">${pluginIconSvg('table-2')}</button>`,
+            '</div>',
             '</div>',
             '<div class="chart-canvas-container">',
             '<canvas class="dynamic-chart-canvas"></canvas>',
+            '<div class="chart-table-container" hidden></div>',
             '</div>',
             '<div class="chart-footer">',
-            `<button type="button" class="chart-download-btn" aria-label="Baixar imagem" title="Baixar imagem" data-tooltip="Baixar imagem">${iconSvg('download')}</button>`,
+            `<button type="button" class="chart-download-btn" aria-label="Baixar imagem" title="Baixar imagem" data-tooltip="Baixar imagem">${pluginIconSvg('download')}</button>`,
             '</div>',
         ].join('');
 
         return wrapper;
+    }
+
+    function initializeChartSwitcher(wrapper, payload) {
+        const buttons = wrapper.querySelectorAll('.switcher-btn');
+        const initialType = normalizeChartType(payload.type || 'bar');
+
+        buttons.forEach((button) => {
+            if (typeof attachActionTooltip === 'function') {
+                attachActionTooltip(button);
+            }
+
+            button.addEventListener('click', function() {
+                renderChartView(wrapper, payload, button.dataset.chartType || 'bar');
+            });
+        });
+
+        renderChartView(wrapper, payload, initialType);
+    }
+
+    function renderChartView(wrapper, payload, type) {
+        const selectedType = normalizeChartType(type);
+        const canvas = wrapper.querySelector('.dynamic-chart-canvas');
+        const tableContainer = wrapper.querySelector('.chart-table-container');
+        const downloadButton = wrapper.querySelector('.chart-download-btn');
+
+        if (!canvas || !tableContainer) {
+            return;
+        }
+
+        if (wrapper._olliverseChartInstance) {
+            wrapper._olliverseChartInstance.destroy();
+            wrapper._olliverseChartInstance = null;
+        }
+
+        wrapper.querySelectorAll('.switcher-btn').forEach((button) => {
+            const isActive = button.dataset.chartType === selectedType;
+
+            button.classList.toggle('active', isActive);
+            button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+
+        if (selectedType === 'table') {
+            canvas.hidden = true;
+            tableContainer.hidden = false;
+            tableContainer.innerHTML = tableHtml(payload);
+
+            if (downloadButton) {
+                downloadButton.disabled = true;
+                downloadButton.setAttribute('aria-disabled', 'true');
+            }
+
+            return;
+        }
+
+        canvas.hidden = false;
+        tableContainer.hidden = true;
+        tableContainer.innerHTML = '';
+        wrapper._olliverseChartInstance = new Chart(canvas.getContext('2d'), chartOptions({
+            ...payload,
+            type: selectedType,
+        }));
+
+        if (downloadButton) {
+            downloadButton.disabled = false;
+            downloadButton.removeAttribute('aria-disabled');
+        }
+    }
+
+    function normalizeChartType(type) {
+        return ['bar', 'pie', 'line', 'table'].includes(type) ? type : 'bar';
     }
 
     function createChartError(message) {
@@ -291,7 +374,7 @@
     function validatePayload(payload) {
         const type = payload?.type || 'bar';
 
-        if (!['bar', 'pie', 'line'].includes(type)) {
+        if (!['bar', 'pie', 'line', 'table'].includes(type)) {
             throw new Error('Tipo de gráfico não suportado.');
         }
 
@@ -511,6 +594,51 @@
                 },
             },
         };
+    }
+
+    function tableHtml(payload) {
+        const rows = payload.labels.map((label, index) => {
+            const value = payload.data[index];
+
+            return [
+                '<tr>',
+                `<td>${escapeHtml(label)}</td>`,
+                `<td>${escapeHtml(value)}</td>`,
+                '</tr>',
+            ].join('');
+        }).join('');
+
+        return [
+            '<table class="plugin-data-table">',
+            '<thead><tr><th>Categoria</th><th>Valor</th></tr></thead>',
+            `<tbody>${rows}</tbody>`,
+            '</table>',
+        ].join('');
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function pluginIconSvg(name) {
+        if (typeof iconSvg === 'function') {
+            return iconSvg(name);
+        }
+
+        const icons = {
+            'bar-chart-3': '<path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path>',
+            download: '<path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path>',
+            'line-chart': '<path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-3 3"></path>',
+            'pie-chart': '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951C12.449 1.996 12 2.448 12 3v8a1 1 0 0 0 1 1z"></path><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>',
+            'table-2': '<path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0-12h12M9 21h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"></path>',
+        };
+
+        return `<svg aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24">${icons[name] || icons['bar-chart-3']}</svg>`;
     }
 
     function rawBlockText(block) {

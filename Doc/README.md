@@ -660,8 +660,9 @@ Quando o plugin esta ligado:
 2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
 3. o frontend carrega Chart.js e os assets do plugin sob demanda;
 4. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
-5. a selecao atual de documentos do RAG pode gerar sugestoes analiticas logo acima da conversa;
-6. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
+5. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
+6. a selecao atual de documentos do RAG pode gerar sugestoes analiticas logo acima da conversa;
+7. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
 
 O fluxo de auto-inspecao usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
@@ -702,6 +703,15 @@ Contrato esperado para o bloco gerado pela IA:
 ```
 
 Tipos aceitos: `bar`, `pie` e `line`.
+
+Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o payload normalizado no proprio card e permite alternar a visualizacao instantaneamente entre:
+
+- `bar`: grafico de barras;
+- `pie`: grafico de pizza;
+- `line`: grafico de linhas;
+- tabela: conversao local de `labels` e `data` em linhas tabulares.
+
+A alternancia acontece apenas no JavaScript do navegador. Ela destroi a instancia Chart.js atual, recria o grafico escolhido quando necessario e nao dispara novas requisicoes para o Ollama. No modo tabela, o botao de download fica desabilitado porque nao ha canvas ativo para exportar como PNG.
 
 O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, mas o comportamento esperado e sempre o contrato simples acima.
 
