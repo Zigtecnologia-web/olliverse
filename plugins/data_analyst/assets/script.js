@@ -17,7 +17,15 @@
             }
 
             messageElement.querySelectorAll('code.language-json-chart').forEach((block) => {
-                renderChartBlock(block);
+                renderChartBlock(block, true);
+            });
+
+            messageElement.querySelectorAll('code.language-json, pre code:not([class*="language-"])').forEach((block) => {
+                if (block.classList.contains('language-json-chart') || !looksLikeChartBlock(block)) {
+                    return;
+                }
+
+                renderChartBlock(block, false);
             });
         },
 
@@ -221,7 +229,7 @@
         status.classList.toggle('error', error);
     }
 
-    function renderChartBlock(block) {
+    function renderChartBlock(block, strict = true) {
         const host = block.closest('.code-block') || block.closest('pre');
         const rawJson = rawBlockText(block);
 
@@ -232,10 +240,10 @@
         let payload;
 
         try {
-            payload = normalizePayload(JSON.parse(extractJsonObject(rawJson) || '{}'), 0);
+            payload = normalizePayload(parseChartJson(rawJson), 0);
             validatePayload(payload);
         } catch (error) {
-            if (rawJson.trim().startsWith('{')) {
+            if (strict && rawJson.trim().startsWith('{')) {
                 host.replaceWith(createChartError(error.message || 'JSON de gráfico inválido.'));
             }
 
@@ -266,6 +274,88 @@
         });
     }
 
+    function looksLikeChartBlock(block) {
+        const rawJson = rawBlockText(block);
+        const json = extractJsonObject(rawJson);
+
+        if (!json) {
+            return false;
+        }
+
+        try {
+            const payload = normalizePayload(parseChartJson(json), 0);
+
+            return isNormalizedPayload(payload)
+                && (hasChartKey(rawJson, 'type') || hasChartKey(rawJson, 'labels') || hasChartKey(rawJson, 'data'));
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function hasChartKey(rawJson, key) {
+        return new RegExp(`["']${key}["']\\s*:`, 'i').test(rawJson);
+    }
+
+    function parseChartJson(rawJson) {
+        const json = extractJsonObject(rawJson) || '{}';
+
+        try {
+            return JSON.parse(json);
+        } catch (error) {
+            return JSON.parse(stripJsonComments(json));
+        }
+    }
+
+    function stripJsonComments(json) {
+        let result = '';
+        let inString = false;
+        let escaped = false;
+
+        for (let index = 0; index < json.length; index += 1) {
+            const char = json[index];
+            const next = json[index + 1] || '';
+
+            if (escaped) {
+                result += char;
+                escaped = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                result += char;
+                escaped = inString;
+                continue;
+            }
+
+            if (char === '"') {
+                result += char;
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString && char === '/' && next === '/') {
+                while (index < json.length && json[index] !== '\n') {
+                    index += 1;
+                }
+                result += '\n';
+                continue;
+            }
+
+            if (!inString && char === '/' && next === '*') {
+                index += 2;
+                while (index < json.length && !(json[index] === '*' && json[index + 1] === '/')) {
+                    index += 1;
+                }
+                index += 1;
+                continue;
+            }
+
+            result += char;
+        }
+
+        return result;
+    }
+
     function createChartWrapper(payload) {
         const wrapper = document.createElement('div');
 
@@ -281,7 +371,11 @@
             '</div>',
             '</div>',
             '<div class="chart-canvas-container">',
-            '<canvas class="dynamic-chart-canvas"></canvas>',
+            '<div class="chart-loading" role="status" aria-live="polite" hidden>',
+            '<span class="chart-loading-spinner" aria-hidden="true"></span>',
+            '<span>Processando grafico...</span>',
+            '</div>',
+            '<canvas class="dynamic-chart-canvas chart-canvas-hidden"></canvas>',
             '<div class="chart-table-container" hidden></div>',
             '</div>',
             '<div class="chart-footer">',
@@ -332,7 +426,9 @@
         });
 
         if (selectedType === 'table') {
+            setChartLoading(wrapper, false);
             canvas.hidden = true;
+            canvas.classList.add('chart-canvas-hidden');
             tableContainer.hidden = false;
             tableContainer.innerHTML = tableHtml(payload);
 
@@ -344,15 +440,46 @@
             return;
         }
 
+        setChartLoading(wrapper, true);
         canvas.hidden = false;
+        canvas.classList.add('chart-canvas-hidden');
         tableContainer.hidden = true;
         tableContainer.innerHTML = '';
-        wrapper._olliverseChartInstance = new Chart(canvas.getContext('2d'), chartOptions({
-            ...payload,
-            type: selectedType,
-        }));
+        try {
+            wrapper._olliverseChartInstance = new Chart(canvas.getContext('2d'), chartOptions({
+                ...payload,
+                type: selectedType,
+            }, () => {
+                canvas.classList.remove('chart-canvas-hidden');
+                setChartLoading(wrapper, false);
+            }));
+        } catch (error) {
+            setChartLoading(wrapper, false);
+            canvas.replaceWith(createChartError(error.message || 'Nao foi possivel renderizar o grafico.'));
+            return;
+        }
 
         if (downloadButton) {
+            downloadButton.disabled = true;
+            downloadButton.setAttribute('aria-disabled', 'true');
+        }
+    }
+
+    function setChartLoading(wrapper, loading) {
+        const loadingElement = wrapper.querySelector('.chart-loading');
+        const downloadButton = wrapper.querySelector('.chart-download-btn');
+
+        wrapper.classList.toggle('chart-rendering', loading);
+
+        wrapper.querySelectorAll('.switcher-btn').forEach((button) => {
+            button.disabled = loading;
+        });
+
+        if (loadingElement) {
+            loadingElement.hidden = !loading;
+        }
+
+        if (downloadButton && !loading) {
             downloadButton.disabled = false;
             downloadButton.removeAttribute('aria-disabled');
         }
@@ -542,7 +669,7 @@
         return value !== null && value !== '' && Number.isFinite(Number(value));
     }
 
-    function chartOptions(payload) {
+    function chartOptions(payload, onComplete = null) {
         const type = payload.type || 'bar';
         const colors = [
             'rgba(52, 152, 219, 0.75)',
@@ -569,6 +696,14 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: {
+                    duration: 180,
+                    onComplete: () => {
+                        if (typeof onComplete === 'function') {
+                            onComplete();
+                        }
+                    },
+                },
                 plugins: {
                     legend: {
                         labels: {

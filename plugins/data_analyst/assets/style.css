@@ -37,6 +37,54 @@
     width: 100%;
 }
 
+.chart-loading {
+    align-items: center;
+    background-color: #121214;
+    color: #a8a8b3;
+    display: flex;
+    font-size: 0.82rem;
+    font-weight: 650;
+    gap: 10px;
+    inset: 0;
+    justify-content: center;
+    position: absolute;
+    z-index: 2;
+}
+
+.chart-loading[hidden] {
+    display: none;
+}
+
+.chart-loading-spinner {
+    animation: chart-loading-spin 0.75s linear infinite;
+    border: 2px solid #323238;
+    border-top-color: #04d361;
+    border-radius: 50%;
+    height: 18px;
+    width: 18px;
+}
+
+.chart-canvas-hidden {
+    opacity: 0;
+}
+
+.dynamic-chart-canvas {
+    opacity: 1;
+    transition: opacity 0.12s ease;
+}
+
+.chart-rendering .switcher-btn,
+.chart-rendering .chart-download-btn {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+@keyframes chart-loading-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .visual-switcher-toolbar {
     align-items: center;
     background-color: #121214;

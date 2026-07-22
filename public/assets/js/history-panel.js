@@ -440,9 +440,18 @@ function loadChatFromHistory(chatId) {
     .then((payload) => {
         window.OlliverseConfig.chatId = chatId;
         window.OlliverseConfig.activePersona = payload.active_persona || window.OlliverseConfig.activePersona;
+        window.OlliverseConfig.initialMessages = payload.messages || [];
+        window.OlliverseConfig.systemPrompt = String(window.OlliverseConfig.activePersona?.prompt_content || window.OlliverseConfig.systemPrompt || '');
         renderLoadedChatMessages(payload.messages || []);
         updateContextUsage(payload.context_usage);
-        if (payload.chat?.model_used) {
+        if (String(payload.chat?.model_used || '').startsWith('web_ai:')) {
+            document.getElementById('providerSelect').value = 'web_ai';
+            localStorage.setItem(window.OlliverseConfig.webAi.storageKey, 'web_ai');
+            updateProviderMode();
+        } else if (payload.chat?.model_used) {
+            document.getElementById('providerSelect').value = 'ollama';
+            localStorage.setItem(window.OlliverseConfig.webAi.storageKey, 'ollama');
+            updateProviderMode();
             selectModel(payload.chat.model_used);
         }
         renderPersonaSelect();
@@ -460,6 +469,7 @@ function loadChatFromHistory(chatId) {
 function renderLoadedChatMessages(messages) {
     const container = document.getElementById('chatMessages');
 
+    window.OlliverseConfig.initialMessages = messages || [];
     container.innerHTML = '';
 
     if (messages.length === 0) {

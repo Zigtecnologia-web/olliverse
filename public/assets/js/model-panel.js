@@ -320,6 +320,7 @@ function deleteSelectedPersona() {
 function syncPersonaState(payload) {
     window.OlliverseConfig.personas = payload.personas || window.OlliverseConfig.personas;
     window.OlliverseConfig.activePersona = payload.persona || window.OlliverseConfig.activePersona;
+    window.OlliverseConfig.systemPrompt = String(window.OlliverseConfig.activePersona?.prompt_content || window.OlliverseConfig.systemPrompt || '');
 
     if (payload.context_usage) {
         updateContextUsage(payload.context_usage);

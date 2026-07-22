@@ -274,6 +274,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'plugin
             'success' => true,
             'plugins' => $pluginManager->all(),
             'active_plugins' => $pluginManager->activePlugins(),
+            'active_plugin_prompts' => $pluginManager->activePrompts(),
         ]);
     } catch (Throwable $error) {
         jsonResponse([
@@ -460,6 +461,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_prompt'])) {
         'system_prompt' => $systemPrompt,
     ], JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_context') {
+    try {
+        $prompt = trim((string) ($_POST['prompt'] ?? ''));
+        $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
+        $ragDocumentIds = selectedRagDocumentIds();
+
+        if ($prompt === '') {
+            throw new RuntimeException('Mensagem vazia para consultar documentos.');
+        }
+
+        if (!$useAllRagDocuments && $ragDocumentIds === []) {
+            jsonResponse([
+                'success' => true,
+                'system_prompt' => $systemPrompt,
+                'sources' => [],
+            ]);
+        }
+
+        $ragChunks = $ragRetrievalService->retrieve(
+            $prompt,
+            3,
+            $useAllRagDocuments ? [] : $ragDocumentIds
+        );
+
+        jsonResponse([
+            'success' => true,
+            'system_prompt' => $ragRetrievalService->augmentSystemPrompt($systemPrompt, $ragChunks),
+            'sources' => $ragRetrievalService->metadata($ragChunks),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'web_ai_persist') {
+    try {
+        $prompt = trim((string) ($_POST['prompt'] ?? ''));
+        $assistantResponse = trim((string) ($_POST['assistant_response'] ?? ''));
+        $webAiModel = trim((string) ($_POST['web_ai_model'] ?? 'web_ai'));
+
+        if ($prompt === '' || $assistantResponse === '') {
+            throw new RuntimeException('Mensagem Web AI incompleta para persistencia.');
+        }
+
+        $messages = $conversationRepository->messages();
+        $messages[] = [
+            'role' => 'user',
+            'content' => $prompt,
+        ];
+        $messages[] = [
+            'role' => 'assistant',
+            'content' => $assistantResponse,
+        ];
+
+        $contextWasTrimmed = $conversationRepository->replaceConversation(
+            $messages,
+            $systemPrompt,
+            'web_ai:' . ($webAiModel !== '' ? $webAiModel : 'browser')
+        );
+
+        $persistedMessages = $conversationRepository->messages();
+
+        jsonResponse([
+            'success' => true,
+            'messages' => $persistedMessages,
+            'context_usage' => $contextWindowService->usage(
+                $contextWindowService->withSystemPrompt($systemPrompt, $persistedMessages)
+            ),
+            'context_trimmed' => $contextWasTrimmed,
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {

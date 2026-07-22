@@ -38,6 +38,13 @@
             <button type="button" id="historyToggleBtn" class="config-btn history-toggle-btn" aria-label="Abrir histórico" title="Abrir histórico" data-tooltip="Abrir histórico"><?php echo iconSvg('sidebar'); ?></button>
             <h1>Olliverse</h1>
             <div class="model-controls">
+                <div class="provider-field">
+                    <label for="providerSelect">Motor</label>
+                    <select id="providerSelect" class="provider-select">
+                        <option value="ollama" selected>Ollama</option>
+                        <option value="web_ai">Web AI</option>
+                    </select>
+                </div>
                 <div class="model-field">
                     <label for="modelMenuButton">Modelo</label>
                     <input type="hidden" id="modelSelect" value="<?php echo htmlspecialchars($defaultModel, ENT_QUOTES, 'UTF-8'); ?>">
@@ -154,6 +161,10 @@
                 <div id="contextBarFill" class="context-bar-fill"></div>
             </div>
             <span id="contextLabel" class="context-label">Contexto 0%</span>
+        </div>
+        <div id="webAiStatus" class="web-ai-run-status" role="status" aria-live="polite" hidden>
+            <span class="web-ai-run-spinner" aria-hidden="true"></span>
+            <span id="webAiStatusText"></span>
         </div>
         <form class="input-form" id="chatForm">
             <input type="text" id="userInput" class="chat-input" placeholder="Escreva sua mensagem aqui..." autocomplete="off" required>
@@ -273,6 +284,8 @@
         initialAssistantMessage: <?php echo json_encode($initialAssistantMessage, JSON_UNESCAPED_UNICODE); ?>,
         chatId: <?php echo json_encode($chatId, JSON_UNESCAPED_UNICODE); ?>,
         hasAvailableModels: <?php echo json_encode((bool) $availableModels); ?>,
+        systemPrompt: <?php echo json_encode($systemPrompt, JSON_UNESCAPED_UNICODE); ?>,
+        initialMessages: <?php echo json_encode($initialMessages, JSON_UNESCAPED_UNICODE); ?>,
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
         initialRagDocuments: <?php echo json_encode($initialRagDocuments, JSON_UNESCAPED_UNICODE); ?>,
         initialChatHistory: <?php echo json_encode($initialChatHistory, JSON_UNESCAPED_UNICODE); ?>,
@@ -280,6 +293,12 @@
         activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
         plugins: <?php echo json_encode($availablePlugins, JSON_UNESCAPED_UNICODE); ?>,
         activePlugins: <?php echo json_encode($activePlugins, JSON_UNESCAPED_UNICODE); ?>,
+        activePluginPrompts: <?php echo json_encode($pluginManager->activePrompts(), JSON_UNESCAPED_UNICODE); ?>,
+        webAi: {
+            modelId: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+            contextTokenLimit: 3400,
+            storageKey: 'olliverse_ai_provider',
+        },
     };
     window.OlliverseState = {
         activeTooltipButton: null,
@@ -293,6 +312,7 @@
 	<script src="public/assets/js/model-panel.js"></script>
 	<script src="public/assets/js/chat-renderer.js"></script>
 	<script src="public/assets/js/chat-stream.js"></script>
+	<script src="public/assets/js/web-ai-provider.js"></script>
 	<script src="public/assets/js/message-ui.js"></script>
 	<script src="public/assets/js/history-panel.js"></script>
 	<script src="public/assets/js/rag-panel.js"></script>

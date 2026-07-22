@@ -2,13 +2,13 @@
 
 - **Criado por:** Valdiney França
 - **Data de criacao:** 19 de julho de 2026
-- **Ultima atualizacao:** 21 de julho de 2026
+- **Ultima atualizacao:** 22 de julho de 2026
 
 ## 1. Visao geral
 
 O **Olliverse** e uma ferramenta de chat local para interagir com modelos de IA executados pelo **Ollama**. A aplicacao foi construida em **PHP puro**, com **JavaScript vanilla**, **CSS proprio** e persistencia em **SQLite**.
 
-O objetivo atual do projeto e oferecer uma interface simples, elegante e local para conversar com LLMs, escolhendo modelos instalados na maquina, gerenciando personas de comportamento e mantendo historico persistente das conversas.
+O objetivo atual do projeto e oferecer uma interface simples, elegante e local para conversar com LLMs, escolhendo modelos instalados na maquina, gerenciando personas de comportamento, mantendo historico persistente das conversas e permitindo alternar o motor entre Ollama e uma Web AI experimental no navegador.
 
 Em termos praticos, a ferramenta funciona como um cliente web local para Ollama, mas com algumas preocupacoes ja bem definidas:
 
@@ -18,7 +18,8 @@ Em termos praticos, a ferramenta funciona como um cliente web local para Ollama,
 - permitir troca e edicao de personas, que funcionam como system prompts reutilizaveis;
 - controlar o tamanho do contexto enviado ao modelo;
 - entregar respostas em streaming para a interface;
-- renderizar respostas em Markdown com suporte a blocos de codigo.
+- renderizar respostas em Markdown com suporte a blocos de codigo;
+- alternar entre o provedor Ollama e o provedor Web AI no navegador.
 - disponibilizar uma Central de Documentacao dentro da propria aplicacao.
 
 ## 2. Tipo de ferramenta que esta sendo construida
@@ -74,6 +75,7 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 - Endpoint de geracao rapida de texto usado: `/api/generate`.
 - Endpoint de listagem de modelos: `/api/tags`.
 - Comando local usado para metadados: `ollama show --verbose`.
+- Web AI experimental no navegador via WebGPU/WebLLM carregado sob demanda.
 
 ## 4. Estrutura de pastas
 
@@ -177,7 +179,7 @@ Esses nomes sao usados apenas para escolher o modelo padrao quando eles existem 
 
 ### 8.1 Chat com IA local
 
-A funcionalidade central e enviar uma mensagem para um modelo local via Ollama e receber uma resposta.
+A funcionalidade central e enviar uma mensagem para um motor de IA e receber uma resposta. O motor padrao continua sendo o Ollama. O seletor **Motor** tambem permite escolher **Web AI**, que tenta executar um modelo leve diretamente no navegador com WebGPU.
 
 Fluxo geral:
 
@@ -189,6 +191,22 @@ Fluxo geral:
 6. A resposta chega em partes para o navegador.
 7. O frontend renderiza progressivamente a resposta.
 8. Ao final, a conversa e persistida no SQLite.
+
+Quando o motor selecionado e **Web AI**:
+
+1. O frontend monta o contexto com system prompt/persona e mensagens ja carregadas.
+2. Se **Usar documentos** estiver ligado, o frontend chama `POST ?action=rag_context` para recuperar trechos relevantes pelo backend.
+3. Se houver plugins ativos, o frontend tambem inclui `activePluginPrompts`, como o prompt do plugin de graficos.
+4. O navegador carrega o motor WebLLM sob demanda.
+5. O modelo configurado em `window.OlliverseConfig.webAi.modelId` responde em streaming na propria aba.
+6. Ao final, o frontend chama `POST ?action=web_ai_persist` para salvar pergunta e resposta no SQLite.
+7. O chat fica marcado com `model_used` no formato `web_ai:<modelo>`.
+
+Como os modelos Web AI rodam em uma janela menor que muitos modelos do Ollama, o frontend usa `window.OlliverseConfig.webAi.contextTokenLimit` para aparar mensagens antigas e encurtar contexto local quando necessario. A pergunta atual e preservada.
+
+Durante o primeiro uso, o navegador pode baixar arquivos grandes do modelo. A interface mostra um status proprio da Web AI com mensagens legiveis, como preparo ou download em andamento, e bloqueia temporariamente o campo de mensagem ate o modelo ficar pronto ou falhar.
+
+Esse modo depende de WebGPU habilitado no navegador e de acesso ao CDN usado pelo driver client-side. Se o navegador nao oferecer WebGPU, a interface mostra a falha e o Ollama segue disponivel como provedor principal.
 
 ### 8.2 Streaming de respostas
 
@@ -544,7 +562,7 @@ Quando **Usar documentos** esta ligado:
 4. se **Todos** estiver marcado, busca em todos os documentos indexados;
 5. se um ou mais documentos especificos estiverem marcados, busca apenas nesses documentos;
 6. o sistema procura no SQLite os pedacos de documentos mais parecidos com a pergunta;
-7. os 3 trechos mais relevantes sao adicionados ao system prompt enviado ao modelo de chat;
+7. os 3 trechos mais relevantes sao adicionados ao system prompt enviado ao motor escolhido;
 8. a IA responde considerando a conversa e esses trechos recuperados;
 9. a interface pode exibir uma indicacao como `Baseado em: nome-do-arquivo.md`.
 
@@ -556,9 +574,11 @@ Na lista de documentos:
 4. o botao `x` remove o documento indexado e seus chunks;
 5. remover um documento impede que ele seja usado em respostas futuras.
 
-Importante: marcar **Usar documentos** nao indexa arquivos. Para o botao ter efeito, primeiro e necessario selecionar um arquivo e clicar em **Indexar**.
+No motor **Ollama**, esse contexto e montado dentro do fluxo de streaming do backend. No motor **Web AI**, o navegador consulta `POST ?action=rag_context` antes de gerar a resposta e injeta o contexto recuperado no prompt enviado ao modelo WebGPU.
 
-O fluxo de indexacao funciona assim:
+Importante: marcar **Usar documentos** nao prepara arquivos novos. Para o botao ter efeito, primeiro e necessario selecionar um arquivo para adicionar aos documentos.
+
+O fluxo de preparo funciona assim:
 
 1. o usuario seleciona um arquivo de texto;
 2. o backend le o conteudo;
@@ -580,7 +600,7 @@ Existe uma diferenca importante entre os modelos:
 1. **Modelo de chat:** responde mensagens, por exemplo `llama3.2:latest`.
 2. **Modelo de embedding:** transforma texto em vetor, por exemplo `nomic-embed-text`.
 
-Por isso, ter um modelo de chat instalado no Ollama nao garante que o RAG consiga indexar documentos. Para indexar, tambem precisa existir um modelo de embedding.
+Por isso, ter um modelo de chat instalado no Ollama nao garante que o RAG consiga preparar documentos. Para preparar documentos, tambem precisa existir um modelo de embedding.
 
 O modelo usado para ler documentos e definido por `RAG_EMBEDDING_MODEL`. O padrao atual e:
 
@@ -600,7 +620,7 @@ significa que o Ollama local ainda nao possui o modelo de embeddings. A correcao
 ollama pull nomic-embed-text
 ```
 
-Depois disso, a indexacao deve conseguir gerar embeddings.
+Depois disso, o preparo dos documentos deve conseguir gerar embeddings.
 
 Sobre tamanho dos arquivos: o arquivo inteiro nao precisa ser pequeno. O que precisa ser pequeno e cada chunk enviado ao modelo de embeddings. Por isso o sistema quebra o texto antes de chamar o Ollama. O chunker atual usa:
 
@@ -658,8 +678,9 @@ Quando o plugin esta ligado:
 
 1. o estado fica guardado em `$_SESSION['olliverse_plugins']`;
 2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
-3. o frontend carrega Chart.js e os assets do plugin sob demanda;
-4. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
+3. o frontend tambem recebe esses prompts em `activePluginPrompts` para orientar respostas da Web AI;
+4. o frontend carrega Chart.js e os assets do plugin sob demanda;
+5. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
 5. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
 6. a selecao atual de documentos do RAG pode gerar sugestoes analiticas logo acima da conversa;
 7. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
@@ -713,7 +734,7 @@ Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o paylo
 
 A alternancia acontece apenas no JavaScript do navegador. Ela destroi a instancia Chart.js atual, recria o grafico escolhido quando necessario e nao dispara novas requisicoes para o Ollama. No modo tabela, o botao de download fica desabilitado porque nao ha canvas ativo para exportar como PNG.
 
-O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, mas o comportamento esperado e sempre o contrato simples acima.
+O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, incluindo remover comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
 
 ## 9. Contratos HTTP atuais
 

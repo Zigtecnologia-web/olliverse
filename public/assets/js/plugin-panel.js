@@ -94,6 +94,7 @@ function togglePlugin(input, active) {
 
         window.OlliverseConfig.plugins = payload.plugins || [];
         window.OlliverseConfig.activePlugins = payload.active_plugins || [];
+        window.OlliverseConfig.activePluginPrompts = payload.active_plugin_prompts || [];
         window.OlliversePlugins.registry = window.OlliverseConfig.plugins;
         window.OlliversePlugins.active = new Set(window.OlliverseConfig.activePlugins.map((plugin) => plugin.slug));
 
