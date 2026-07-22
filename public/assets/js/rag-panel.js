@@ -60,9 +60,6 @@ function uploadRagDocument() {
         return;
     }
 
-    const body = new FormData();
-    body.append('document', file);
-
     pickFileBtn.disabled = true;
     fileInput.disabled = true;
     setRagStatus('Preparando documento...');
@@ -70,9 +67,15 @@ function uploadRagDocument() {
     const url = new URL(window.location.href);
     url.searchParams.set('action', 'rag_ingest');
 
-    fetch(url.toString(), {
-        method: 'POST',
-        body,
+    prepareRagUploadFile(file)
+    .then((uploadFile) => {
+        const body = new FormData();
+        body.append('document', uploadFile, file.name);
+
+        return fetch(url.toString(), {
+            method: 'POST',
+            body,
+        });
     })
     .then((response) => response.json().then((payload) => {
         if (!response.ok || !payload.success) {
@@ -93,6 +96,72 @@ function uploadRagDocument() {
         pickFileBtn.disabled = false;
         fileInput.disabled = false;
     });
+}
+
+function prepareRagUploadFile(file) {
+    if (!isSpreadsheetFile(file)) {
+        return Promise.resolve(file);
+    }
+
+    if (!window.XLSX) {
+        return Promise.reject(new Error('Leitor de planilhas indisponível. Verifique a conexão e tente novamente.'));
+    }
+
+    setRagStatus('Convertendo planilha...');
+
+    return file.arrayBuffer()
+        .then((buffer) => {
+            const workbook = window.XLSX.read(buffer, { type: 'array' });
+            const content = spreadsheetWorkbookToText(workbook, file.name);
+
+            if (content.trim() === '') {
+                throw new Error('Não foi possível ler texto da planilha.');
+            }
+
+            return new File([content], file.name, { type: 'text/plain' });
+        });
+}
+
+function isSpreadsheetFile(file) {
+    const name = String(file?.name || '').toLowerCase();
+
+    return name.endsWith('.xlsx') || name.endsWith('.xls');
+}
+
+function spreadsheetWorkbookToText(workbook, fileName) {
+    return workbook.SheetNames.map((sheetName) => {
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = window.XLSX.utils.sheet_to_json(worksheet, {
+            header: 1,
+            blankrows: false,
+            defval: '',
+            raw: false,
+        });
+        const table = rows
+            .map((row) => row.map(csvCell).join(','))
+            .filter((line) => line.trim() !== '')
+            .join('\n');
+
+        if (table === '') {
+            return '';
+        }
+
+        return [
+            `Arquivo: ${fileName}`,
+            `Aba: ${sheetName}`,
+            table,
+        ].join('\n');
+    }).filter(Boolean).join('\n\n');
+}
+
+function csvCell(value) {
+    const text = String(value ?? '');
+
+    if (!/[",\n\r]/.test(text)) {
+        return text;
+    }
+
+    return `"${text.replaceAll('"', '""')}"`;
 }
 
 function deleteRagDocument(documentId, sourceName) {

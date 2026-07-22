@@ -124,7 +124,7 @@
                 </label>
             </div>
             <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
-                <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,text/*">
+                <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,.csv,.xlsx,.xls,text/*">
                 <button type="button" id="ragPickFileBtn" class="secondary-config-btn rag-add-document-btn" aria-label="Adicionar documento" title="Adicionar documento" data-tooltip="Adicionar documento"><?php echo iconSvg('file-plus'); ?></button>
                 <span id="ragStatus" class="rag-status" aria-live="polite"></span>
             </form>
@@ -270,6 +270,7 @@
 <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/highlight.js/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <?php foreach ($activePlugins as $plugin): ?>
     <?php foreach (($plugin['dependencies']['js'] ?? []) as $dependencySrc): ?>
         <script src="<?php echo htmlspecialchars((string) $dependencySrc, ENT_QUOTES, 'UTF-8'); ?>" data-plugin-asset="<?php echo htmlspecialchars((string) $plugin['slug'], ENT_QUOTES, 'UTF-8'); ?>"></script>

@@ -580,12 +580,15 @@ Importante: marcar **Usar documentos** nao prepara arquivos novos. Para o botao 
 
 O fluxo de preparo funciona assim:
 
-1. o usuario seleciona um arquivo de texto;
-2. o backend le o conteudo;
-3. o texto e dividido em pedacos pequenos, chamados chunks;
-4. cada chunk e enviado ao Ollama para gerar embedding;
-5. o chunk e o embedding sao salvos na tabela `document_chunks`;
-6. em perguntas futuras, esses chunks podem ser recuperados por similaridade.
+1. o usuario seleciona um arquivo de texto ou planilha `.xlsx`/`.xls`;
+2. se for planilha, o navegador converte as abas em texto tabular antes do envio;
+3. o backend le o conteudo textual;
+4. o texto e dividido em pedacos pequenos, chamados chunks;
+5. cada chunk e enviado ao Ollama para gerar embedding;
+6. o chunk e o embedding sao salvos na tabela `document_chunks`;
+7. em perguntas futuras, esses chunks podem ser recuperados por similaridade.
+
+Arquivos `.txt`, `.csv`, `.json` e outros textos continuam seguindo o upload normal. Arquivos `.xlsx` e `.xls` sao processados no navegador com SheetJS: cada aba com conteudo vira uma secao textual com o nome do arquivo, o nome da aba e linhas em formato CSV. O endpoint `POST ?action=rag_ingest` continua recebendo apenas texto plano.
 
 O Ollama possui funcionalidade propria para gerar embeddings. Neste projeto, essa chamada e feita pelo backend usando:
 
