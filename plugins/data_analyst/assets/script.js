@@ -1,13 +1,16 @@
 (function() {
+    const INSPECT_STORAGE_KEY = 'olliverse:data_analyst:inspect_rag_document';
+
     window.OlliversePlugins = window.OlliversePlugins || {};
 
     window.OlliversePlugins.data_analyst = {
         activate() {
             ensureInsightsPanel();
-            scheduleInsightsInspection();
+            maybeScheduleInsightsInspection();
         },
 
         deactivate() {
+            window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
             document.getElementById('dataInsightsPanel')?.remove();
         },
 
@@ -35,19 +38,26 @@
     };
 
     ensureInsightsPanel();
-    scheduleInsightsInspection();
+    maybeScheduleInsightsInspection();
     document.addEventListener('change', (event) => {
         if (!isDataAnalystActive()) {
             return;
         }
 
-        if (event.target?.matches?.('#ragAllDocuments, .rag-document-checkbox')) {
-            scheduleInsightsInspection();
+        if (event.target?.matches?.('#dataInsightsToggle')) {
+            setInsightsInspectionEnabled(event.target.checked);
+            return;
+        }
+
+        if (event.target?.matches?.('.rag-document-checkbox')) {
+            updateInsightsPanelVisibility();
+            maybeScheduleInsightsInspection();
         }
     });
     document.addEventListener('olliverse:rag-documents-rendered', () => {
         if (isDataAnalystActive()) {
-            scheduleInsightsInspection();
+            updateInsightsPanelVisibility();
+            maybeScheduleInsightsInspection();
         }
     });
 
@@ -62,11 +72,34 @@
         panel.id = 'dataInsightsPanel';
         panel.className = 'data-insights-edge-panel';
         panel.innerHTML = [
+            '<div class="data-insights-toolbar">',
+            '<label class="data-insights-toggle" for="dataInsightsToggle">',
+            '<input type="checkbox" id="dataInsightsToggle">',
+            '<span class="data-insights-toggle-track" aria-hidden="true"></span>',
+            '<span class="data-insights-toggle-label">Inspecionar documento</span>',
+            '</label>',
             '<div id="dataInsightsStatus" class="data-insights-status" aria-live="polite"></div>',
+            '</div>',
             '<div id="dataInsightsContent" class="data-insights-content"></div>',
         ].join('');
 
         chatMessages.parentElement.insertBefore(panel, chatMessages);
+        document.getElementById('dataInsightsToggle').checked = isInsightsInspectionEnabled();
+        updateInsightsPanelVisibility();
+    }
+
+    function maybeScheduleInsightsInspection() {
+        if (!hasSelectedRagInsightDocuments()) {
+            stopInsightsInspection();
+            return;
+        }
+
+        if (!isInsightsInspectionEnabled()) {
+            stopInsightsInspection();
+            return;
+        }
+
+        scheduleInsightsInspection();
     }
 
     function scheduleInsightsInspection() {
@@ -77,16 +110,20 @@
     function inspectSelectedRagDocuments() {
         ensureInsightsPanel();
 
+        if (!isDataAnalystActive() || !isInsightsInspectionEnabled()) {
+            stopInsightsInspection();
+            return;
+        }
+
         const model = document.getElementById('modelSelect')?.value || '';
         const body = new URLSearchParams({
             model,
-            rag_all_documents: document.getElementById('ragAllDocuments')?.checked ? '1' : '0',
         });
         const selectedDocumentIds = selectedRagInsightDocumentIds();
+        const selectedDocumentSignature = selectedDocumentIds.join(',');
 
-        if (!document.getElementById('ragAllDocuments')?.checked && selectedDocumentIds.length === 0) {
-            clearInsightsContent();
-            setInsightsStatus('Selecione um documento RAG para gerar sugestoes analiticas.', false);
+        if (selectedDocumentIds.length === 0) {
+            stopInsightsInspection();
             return;
         }
 
@@ -109,6 +146,10 @@
                 throw new Error(payload.error || 'Nao foi possivel inspecionar os dados.');
             }
 
+            if (!isInsightsInspectionEnabled() || selectedRagInsightDocumentIds().join(',') !== selectedDocumentSignature) {
+                return;
+            }
+
             renderInsightsPanel(payload.inspection, payload.sources || []);
             setInsightsStatus('', false);
         })
@@ -116,6 +157,49 @@
             clearInsightsContent();
             setInsightsStatus(error.message || 'Nao foi possivel inspecionar os dados.', true);
         });
+    }
+
+    function setInsightsInspectionEnabled(enabled) {
+        localStorage.setItem(INSPECT_STORAGE_KEY, enabled ? '1' : '0');
+
+        if (enabled) {
+            maybeScheduleInsightsInspection();
+            return;
+        }
+
+        stopInsightsInspection();
+    }
+
+    function isInsightsInspectionEnabled() {
+        return localStorage.getItem(INSPECT_STORAGE_KEY) === '1';
+    }
+
+    function stopInsightsInspection() {
+        window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
+        clearInsightsContent();
+        setInsightsStatus('', false);
+    }
+
+    function updateInsightsPanelVisibility() {
+        const panel = document.getElementById('dataInsightsPanel');
+        const toggle = document.querySelector('.data-insights-toggle');
+        const hasSelectedDocuments = hasSelectedRagInsightDocuments();
+
+        if (toggle) {
+            toggle.hidden = !hasSelectedDocuments;
+        }
+
+        if (panel) {
+            panel.hidden = !hasSelectedDocuments;
+        }
+
+        if (!hasSelectedDocuments) {
+            stopInsightsInspection();
+        }
+    }
+
+    function hasSelectedRagInsightDocuments() {
+        return selectedRagInsightDocumentIds().length > 0;
     }
 
     function renderInsightsPanel(inspection, sources) {
@@ -169,8 +253,6 @@
             button.addEventListener('click', () => {
                 const query = buildInsightQuery(item.query || button.textContent, chartType);
 
-                enableRagForInsight();
-
                 if (typeof window.OlliverseSubmitMessage === 'function') {
                     window.OlliverseSubmitMessage(query);
                 }
@@ -184,7 +266,7 @@
         return [
             query,
             '',
-            `Use os documentos selecionados no RAG e gere um grafico do tipo ${chartType} em um bloco json-chart.`,
+            `Use os documentos ativos e gere um grafico do tipo ${chartType} em um bloco json-chart.`,
         ].join('\n');
     }
 
@@ -196,14 +278,6 @@
         return Array.from(document.querySelectorAll('.rag-document-checkbox:checked'))
             .map((checkbox) => Number(checkbox.value))
             .filter((documentId) => documentId > 0);
-    }
-
-    function enableRagForInsight() {
-        const ragToggle = document.getElementById('ragToggle');
-
-        if (ragToggle) {
-            ragToggle.checked = true;
-        }
     }
 
     function clearInsightsContent() {

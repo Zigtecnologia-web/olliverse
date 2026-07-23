@@ -195,7 +195,7 @@ Fluxo geral:
 Quando o motor selecionado e **Web AI**:
 
 1. O frontend monta o contexto com system prompt/persona e mensagens ja carregadas.
-2. Se **Usar documentos** estiver ligado, o frontend chama `POST ?action=rag_context` para recuperar trechos relevantes pelo backend.
+2. Se houver documentos marcados no menu de documentos, o frontend chama `POST ?action=rag_context` para recuperar trechos relevantes pelo backend.
 3. Se houver plugins ativos, o frontend tambem inclui `activePluginPrompts`, como o prompt do plugin de graficos.
 4. O navegador carrega o motor WebLLM sob demanda.
 5. O modelo configurado em `window.OlliverseConfig.webAi.modelId` responde em streaming na propria aba.
@@ -542,41 +542,39 @@ Caracteristicas:
 - estado de digitacao com pontos animados;
 - responsividade para telas pequenas.
 
-### 8.21 RAG local e botao Usar documentos
+### 8.21 RAG local e documentos ativos
 
 RAG significa usar documentos locais como contexto adicional para a resposta da IA.
 
-Na interface, isso aparece como o botao **Usar documentos**.
+Na interface, isso aparece como um menu compacto de documentos ativos. O contador no topo do chat indica quantos arquivos estao marcados, por exemplo `2 documentos ativos`, e tambem abre o menu de selecao.
 
-Quando **Usar documentos** esta desligado:
+Quando nenhum documento esta marcado:
 
 1. o chat funciona normalmente;
 2. a IA recebe apenas a persona/system prompt e o historico da conversa;
-3. documentos indexados nao entram na resposta.
+3. documentos preparados nao entram na resposta.
 
-Quando **Usar documentos** esta ligado:
+Quando um ou mais documentos estao marcados:
 
 1. o usuario envia uma pergunta;
 2. o sistema transforma essa pergunta em um vetor de significado usando o modelo de embeddings;
-3. o sistema verifica quais documentos devem ser usados;
-4. se **Todos** estiver marcado, busca em todos os documentos indexados;
-5. se um ou mais documentos especificos estiverem marcados, busca apenas nesses documentos;
-6. o sistema procura no SQLite os pedacos de documentos mais parecidos com a pergunta;
-7. os 3 trechos mais relevantes sao adicionados ao system prompt enviado ao motor escolhido;
-8. a IA responde considerando a conversa e esses trechos recuperados;
-9. a interface pode exibir uma indicacao como `Baseado em: nome-do-arquivo.md`.
+3. o sistema usa apenas os documentos marcados no menu;
+4. o sistema procura no SQLite os pedacos de documentos mais parecidos com a pergunta;
+5. os 3 trechos mais relevantes sao adicionados ao system prompt enviado ao motor escolhido;
+6. a IA responde considerando a conversa e esses trechos recuperados;
+7. a interface pode exibir uma indicacao como `Baseado em: nome-do-arquivo.md`.
 
 Na lista de documentos:
 
-1. **Todos** significa usar todos os documentos indexados;
-2. marcar um documento especifico desmarca **Todos** e limita a busca;
-3. marcar dois ou mais documentos faz a busca usar somente esse conjunto;
-4. o botao `x` remove o documento indexado e seus chunks;
+1. cada arquivo tem um checkbox proprio;
+2. marcar um documento inclui esse arquivo no contexto da proxima mensagem;
+3. desmarcar todos os documentos desativa o RAG para a conversa;
+4. o botao `x` abre um modal de confirmacao antes de remover o documento preparado e seus chunks;
 5. remover um documento impede que ele seja usado em respostas futuras.
 
 No motor **Ollama**, esse contexto e montado dentro do fluxo de streaming do backend. No motor **Web AI**, o navegador consulta `POST ?action=rag_context` antes de gerar a resposta e injeta o contexto recuperado no prompt enviado ao modelo WebGPU.
 
-Importante: marcar **Usar documentos** nao prepara arquivos novos. Para o botao ter efeito, primeiro e necessario selecionar um arquivo para adicionar aos documentos.
+Importante: marcar um documento nao prepara arquivos novos. Para aparecer na lista, primeiro e necessario selecionar um arquivo para adicionar aos documentos.
 
 O fluxo de preparo funciona assim:
 
@@ -685,12 +683,12 @@ Quando o plugin esta ligado:
 4. o frontend carrega Chart.js e os assets do plugin sob demanda;
 5. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
 5. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
-6. a selecao atual de documentos do RAG pode gerar sugestoes analiticas logo acima da conversa;
+6. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
 7. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
 
-O fluxo de auto-inspecao usa `plugins/data_analyst/includes/inspect_prompt.php`.
+O fluxo de inspecao opcional usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
-Quando o usuario seleciona documentos ja indexados no RAG com o plugin ativo:
+Quando o plugin esta ativo, a opcao **Inspecionar documento** fica desligada por padrao e so aparece se existir pelo menos um documento ativo. Quando o usuario liga essa opcao:
 
 1. o frontend chama `POST /index.php?action=data_insights`;
 2. o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
@@ -698,7 +696,7 @@ Quando o usuario seleciona documentos ja indexados no RAG com o plugin ativo:
 4. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
 5. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
 6. o frontend renderiza um painel com resumo e chips de sugestoes acima da conversa;
-7. cada chip ativa o uso de documentos e dispara uma pergunta normal do chat pedindo grafico `json-chart`.
+7. cada chip dispara uma pergunta normal do chat pedindo grafico `json-chart` com os documentos ativos.
 
 O prompt do plugin funciona como uma regra nativa de planejamento de grafico. Antes de gerar o bloco `json-chart`, o modelo deve inferir:
 
@@ -960,7 +958,7 @@ O estado e salvo na sessao PHP e passa a valer para as proximas mensagens enviad
 POST /index.php?action=data_insights
 Content-Type: application/x-www-form-urlencoded
 
-model=llama3.2&rag_all_documents=0&rag_document_ids[]=12
+model=llama3.2&rag_document_ids[]=12
 ```
 
 Resposta esperada:
@@ -982,7 +980,7 @@ Resposta esperada:
 }
 ```
 
-O endpoint nao recebe upload novo. Ele usa os documentos ja indexados em `rag_documents` e `document_chunks`. Quando `rag_all_documents=1`, a amostra considera todos os documentos disponiveis; quando `rag_all_documents=0`, usa apenas os IDs enviados em `rag_document_ids[]`.
+O endpoint nao recebe upload novo. Ele usa apenas os IDs enviados em `rag_document_ids[]`, consultando os documentos ja preparados em `rag_documents` e `document_chunks`. Na interface, ele so e chamado quando o plugin de dados esta ativo e a opcao **Inspecionar documento** esta ligada.
 
 O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 

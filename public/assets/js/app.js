@@ -22,21 +22,17 @@ function submitChatMessage(overridePrompt = null) {
     const providerSelect = document.getElementById('providerSelect');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChatBtn');
-    const ragToggle = document.getElementById('ragToggle');
     const ragPickFileBtn = document.getElementById('ragPickFileBtn');
     const ragUploadBtn = document.getElementById('ragUploadBtn');
-    const ragAllDocuments = document.getElementById('ragAllDocuments');
     const prompt = String(overridePrompt ?? inputEl.value).trim();
     const model = modelSelect.value;
-    const ragEnabled = ragToggle?.checked ? '1' : '0';
+    const selectedRagDocumentIds = getSelectedRagDocumentIds();
     const body = new URLSearchParams({
         prompt,
         model,
-        rag_enabled: ragEnabled,
-        rag_all_documents: ragAllDocuments?.checked ? '1' : '0',
     });
 
-    getSelectedRagDocumentIds().forEach((documentId) => {
+    selectedRagDocumentIds.forEach((documentId) => {
         body.append('rag_document_ids[]', String(documentId));
     });
 
@@ -60,7 +56,6 @@ function submitChatMessage(overridePrompt = null) {
     modelInfoBtn.disabled = true;
     personaSelect.disabled = true;
     providerSelect.disabled = true;
-    if (ragToggle) ragToggle.disabled = true;
     if (ragPickFileBtn) ragPickFileBtn.disabled = true;
     if (ragUploadBtn) ragUploadBtn.disabled = true;
     setRagDocumentControlsDisabled(true);
@@ -118,7 +113,6 @@ function submitChatMessage(overridePrompt = null) {
         modelInfoBtn.disabled = !hasAvailableModels;
         personaSelect.disabled = false;
         providerSelect.disabled = false;
-        if (ragToggle) ragToggle.disabled = false;
         if (ragPickFileBtn) ragPickFileBtn.disabled = false;
         if (ragUploadBtn) ragUploadBtn.disabled = false;
         setRagDocumentControlsDisabled(false);
@@ -311,7 +305,6 @@ function submitWebAiMessage(prompt) {
     const providerSelect = document.getElementById('providerSelect');
     const sendBtn = document.getElementById('sendBtn');
     const newChatBtn = document.getElementById('newChatBtn');
-    const ragToggle = document.getElementById('ragToggle');
     const ragPickFileBtn = document.getElementById('ragPickFileBtn');
 
     appendMessage(prompt, 'user');
@@ -323,7 +316,6 @@ function submitWebAiMessage(prompt) {
     modelInfoBtn.disabled = true;
     personaSelect.disabled = true;
     providerSelect.disabled = true;
-    if (ragToggle) ragToggle.disabled = true;
     if (ragPickFileBtn) ragPickFileBtn.disabled = true;
     setRagDocumentControlsDisabled(true);
     sendBtn.disabled = true;
@@ -381,7 +373,6 @@ function submitWebAiMessage(prompt) {
         providerSelect.disabled = false;
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
-        if (ragToggle) ragToggle.disabled = false;
         if (ragPickFileBtn) ragPickFileBtn.disabled = false;
         setRagDocumentControlsDisabled(false);
         updateProviderMode();
@@ -390,12 +381,9 @@ function submitWebAiMessage(prompt) {
 }
 
 function webAiRagContext(prompt) {
-    const ragToggle = document.getElementById('ragToggle');
-    const ragAllDocuments = document.getElementById('ragAllDocuments');
-    const ragEnabled = ragToggle?.checked === true;
     const selectedDocumentIds = getSelectedRagDocumentIds();
 
-    if (!ragEnabled || (!ragAllDocuments?.checked && selectedDocumentIds.length === 0)) {
+    if (selectedDocumentIds.length === 0) {
         return Promise.resolve({
             systemPrompt: window.OlliverseConfig.systemPrompt,
             sources: [],
@@ -405,7 +393,6 @@ function webAiRagContext(prompt) {
     const url = new URL(window.location.href);
     const body = new URLSearchParams({
         prompt,
-        rag_all_documents: ragAllDocuments?.checked ? '1' : '0',
     });
 
     selectedDocumentIds.forEach((documentId) => {
@@ -575,6 +562,10 @@ document.addEventListener('keydown', function(event) {
 
     if (event.key === 'Escape' && document.getElementById('deleteChatModal').classList.contains('open')) {
         closeDeleteChatModal();
+    }
+
+    if (event.key === 'Escape' && document.getElementById('deleteRagDocumentModal').classList.contains('open')) {
+        closeDeleteRagDocumentModal();
     }
 
     if (event.key === 'Escape') {

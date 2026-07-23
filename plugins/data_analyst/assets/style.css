@@ -227,6 +227,74 @@
     padding: 10px 20px;
 }
 
+.data-insights-edge-panel[hidden],
+.data-insights-toggle[hidden] {
+    display: none;
+}
+
+.data-insights-toolbar {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.data-insights-toggle {
+    align-items: center;
+    color: #c4c4cc;
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    font-weight: 700;
+    gap: 8px;
+    min-height: 24px;
+}
+
+.data-insights-toggle input {
+    height: 1px;
+    opacity: 0;
+    position: absolute;
+    width: 1px;
+}
+
+.data-insights-toggle-track {
+    background-color: #323238;
+    border: 1px solid #3f3f46;
+    border-radius: 999px;
+    display: inline-flex;
+    flex: 0 0 34px;
+    height: 19px;
+    padding: 2px;
+    transition: background-color 0.2s, border-color 0.2s;
+    width: 34px;
+}
+
+.data-insights-toggle-track::before {
+    background-color: #a8a8b3;
+    border-radius: 50%;
+    content: '';
+    display: block;
+    height: 13px;
+    transition: background-color 0.2s, transform 0.2s;
+    width: 13px;
+}
+
+.data-insights-toggle input:checked + .data-insights-toggle-track {
+    background-color: rgba(4, 211, 97, 0.18);
+    border-color: #04d361;
+}
+
+.data-insights-toggle input:checked + .data-insights-toggle-track::before {
+    background-color: #04d361;
+    transform: translateX(15px);
+}
+
+.data-insights-toggle-label {
+    white-space: nowrap;
+}
+
 .insight-chip-btn {
     background: transparent;
     border: 1px solid #3f3f46;
@@ -247,8 +315,11 @@
 
 .data-insights-status {
     color: #7c7c8a;
+    flex: 1;
     font-size: 0.78rem;
     min-height: 1rem;
+    min-width: 0;
+    text-align: right;
 }
 
 .data-insights-status.error {
@@ -348,6 +419,17 @@
 
     .data-insights-edge-panel {
         padding: 10px 14px;
+    }
+
+    .data-insights-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .data-insights-status {
+        text-align: left;
+        width: 100%;
     }
 
     .insight-chip-btn {

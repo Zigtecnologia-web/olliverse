@@ -114,6 +114,8 @@ final readonly class OllamaClient
         $streamBuffer = '';
         $streamError = '';
 
+        $this->extendExecutionLimit($this->responseTimeout);
+
         $ch = curl_init($this->baseUrl . '/api/chat');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -181,6 +183,8 @@ final readonly class OllamaClient
      */
     private function postJson(string $path, array $payload, int $timeout): array
     {
+        $this->extendExecutionLimit($timeout);
+
         $ch = curl_init($this->baseUrl . $path);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -208,6 +212,16 @@ final readonly class OllamaClient
         }
 
         return $result;
+    }
+
+    private function extendExecutionLimit(int $timeout): void
+    {
+        $executionLimit = max(30, $timeout + $this->connectTimeout + 5);
+        @ini_set('max_execution_time', (string) $executionLimit);
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit($executionLimit);
+        }
     }
 
     /**

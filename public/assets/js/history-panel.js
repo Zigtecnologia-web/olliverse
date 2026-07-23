@@ -3,6 +3,11 @@ function initHistoryPanel() {
     updateExportLink();
     setHistoryOpen(Boolean(window.OlliverseState.historyOpen));
 
+    document.querySelectorAll('.workspace-tools [data-tooltip], #historyCloseBtn').forEach((button) => {
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(button);
+        }
+    });
     document.getElementById('exportChatBtn').addEventListener('click', function(event) {
         event.stopPropagation();
         toggleExportMenu();

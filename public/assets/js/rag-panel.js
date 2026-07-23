@@ -1,5 +1,6 @@
 function initRagPanel() {
     renderRagDocuments(window.OlliverseConfig.initialRagDocuments || []);
+    initRagDeleteModal();
 
     const form = document.getElementById('ragUploadForm');
     const fileInput = document.getElementById('ragFileInput');
@@ -28,15 +29,35 @@ function initRagPanel() {
         event.preventDefault();
         uploadRagDocument();
     });
+
+    document.addEventListener('click', function(event) {
+        if (!event.target.closest('.rag-documents-menu')) {
+            closeRagDocumentsMenu();
+        }
+    });
+}
+
+function initRagDeleteModal() {
+    const modal = document.getElementById('deleteRagDocumentModal');
+    const closeButton = document.getElementById('closeDeleteRagDocumentModalBtn');
+    const cancelButton = document.getElementById('cancelDeleteRagDocumentBtn');
+    const confirmButton = document.getElementById('confirmDeleteRagDocumentBtn');
+
+    if (!modal || !closeButton || !cancelButton || !confirmButton) {
+        return;
+    }
+
+    closeButton.addEventListener('click', closeDeleteRagDocumentModal);
+    cancelButton.addEventListener('click', closeDeleteRagDocumentModal);
+    confirmButton.addEventListener('click', deletePendingRagDocument);
+    modal.addEventListener('click', function(event) {
+        if (event.target === event.currentTarget) {
+            closeDeleteRagDocumentModal();
+        }
+    });
 }
 
 function getSelectedRagDocumentIds() {
-    const allDocumentsCheckbox = document.getElementById('ragAllDocuments');
-
-    if (allDocumentsCheckbox?.checked) {
-        return [];
-    }
-
     return Array.from(document.querySelectorAll('.rag-document-checkbox:checked'))
         .map((checkbox) => Number(checkbox.value))
         .filter((documentId) => documentId > 0);
@@ -44,7 +65,7 @@ function getSelectedRagDocumentIds() {
 
 function setRagDocumentControlsDisabled(disabled) {
     document
-        .querySelectorAll('.rag-document-checkbox, #ragAllDocuments, .rag-delete-btn')
+        .querySelectorAll('.rag-document-checkbox, .rag-delete-btn, .rag-documents-menu-btn')
         .forEach((control) => {
             control.disabled = disabled;
         });
@@ -165,10 +186,67 @@ function csvCell(value) {
 }
 
 function deleteRagDocument(documentId, sourceName) {
-    if (!window.confirm(`Excluir "${sourceName}" dos documentos adicionados?`)) {
+    openDeleteRagDocumentModal(documentId, sourceName);
+}
+
+function openDeleteRagDocumentModal(documentId, sourceName) {
+    const modal = document.getElementById('deleteRagDocumentModal');
+    const confirmButton = document.getElementById('confirmDeleteRagDocumentBtn');
+    const status = document.getElementById('deleteRagDocumentStatus');
+
+    if (!modal || !confirmButton || !status) {
+        deleteRagDocumentRequest(documentId, sourceName);
         return;
     }
 
+    window.OlliverseState.pendingDeleteRagDocument = {
+        id: Number(documentId),
+        sourceName,
+    };
+    document.getElementById('deleteRagDocumentModalText').textContent = `Deseja realmente excluir "${sourceName}" dos documentos adicionados?`;
+    status.classList.remove('error');
+    status.textContent = '';
+    confirmButton.disabled = false;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    confirmButton.focus();
+}
+
+function closeDeleteRagDocumentModal() {
+    const modal = document.getElementById('deleteRagDocumentModal');
+
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    window.OlliverseState.pendingDeleteRagDocument = null;
+}
+
+function deletePendingRagDocument() {
+    const pendingDocument = window.OlliverseState.pendingDeleteRagDocument;
+    const status = document.getElementById('deleteRagDocumentStatus');
+    const confirmButton = document.getElementById('confirmDeleteRagDocumentBtn');
+
+    if (!pendingDocument?.id) {
+        return;
+    }
+
+    status.classList.remove('error');
+    status.textContent = 'Excluindo documento...';
+    confirmButton.disabled = true;
+    deleteRagDocumentRequest(pendingDocument.id, pendingDocument.sourceName, {
+        onSuccess: closeDeleteRagDocumentModal,
+        onError(error) {
+            status.classList.add('error');
+            status.textContent = error.message || 'Erro ao excluir documento.';
+            confirmButton.disabled = false;
+        },
+    });
+}
+
+function deleteRagDocumentRequest(documentId, sourceName, callbacks = {}) {
     const body = new URLSearchParams({
         document_id: String(documentId),
     });
@@ -194,40 +272,52 @@ function deleteRagDocument(documentId, sourceName) {
     .then((payload) => {
         renderRagDocuments(payload.documents || []);
         setRagStatus(`${sourceName} excluído dos documentos adicionados.`);
+        callbacks.onSuccess?.();
     })
     .catch((error) => {
         setRagStatus(error.message || 'Erro ao excluir documento.', true);
+        callbacks.onError?.(error);
     });
 }
 
 function renderRagDocuments(documents) {
     const container = document.getElementById('ragDocumentList');
-    const ragToggleField = document.querySelector('.rag-toggle-field');
-    const ragToggle = document.getElementById('ragToggle');
 
     if (!container) {
         return;
     }
 
-    container.innerHTML = '';
-    if (ragToggleField) {
-        ragToggleField.hidden = !documents.length;
-    }
+    const previousCheckboxes = getDocumentCheckboxes();
+    const previousDocumentIds = new Set(previousCheckboxes.map((checkbox) => Number(checkbox.value)));
+    const previousSelectedIds = new Set(getSelectedRagDocumentIds());
 
-    if (!documents.length && ragToggle) {
-        ragToggle.checked = false;
-    }
+    container.innerHTML = '';
 
     if (!documents.length) {
         const empty = document.createElement('span');
         empty.className = 'rag-document-empty';
         empty.textContent = 'Nenhum documento adicionado';
         container.appendChild(empty);
+        closeRagDocumentsMenu();
         document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
         return;
     }
 
-    container.appendChild(createAllDocumentsChip());
+    const menu = document.createElement('div');
+    const menuButton = document.createElement('button');
+    const popover = document.createElement('div');
+
+    menu.className = 'rag-documents-menu';
+    menuButton.type = 'button';
+    menuButton.className = 'rag-documents-menu-btn';
+    menuButton.setAttribute('aria-expanded', 'false');
+    menuButton.setAttribute('aria-label', 'Gerenciar documentos ativos');
+    popover.className = 'rag-documents-popover';
+    popover.setAttribute('role', 'menu');
+    menuButton.addEventListener('click', function(event) {
+        event.stopPropagation();
+        toggleRagDocumentsMenu(menu, menuButton);
+    });
 
     documents.forEach((documentInfo) => {
         const item = document.createElement('label');
@@ -241,8 +331,12 @@ function renderRagDocuments(documents) {
         checkbox.type = 'checkbox';
         checkbox.className = 'rag-document-checkbox';
         checkbox.value = String(documentId);
-        checkbox.checked = document.getElementById('ragAllDocuments')?.checked === true;
-        checkbox.addEventListener('change', syncAllDocumentsSelection);
+        checkbox.checked = previousCheckboxes.length === 0
+            || previousSelectedIds.has(documentId)
+            || !previousDocumentIds.has(documentId);
+        checkbox.addEventListener('change', function() {
+            updateRagDocumentBadge();
+        });
         text.className = 'rag-document-name';
         text.textContent = `${sourceName} (${documentInfo.chunks})`;
         deleteButton.type = 'button';
@@ -259,43 +353,14 @@ function renderRagDocuments(documents) {
         item.appendChild(checkbox);
         item.appendChild(text);
         item.appendChild(deleteButton);
-        container.appendChild(item);
+        popover.appendChild(item);
     });
 
+    menu.appendChild(menuButton);
+    menu.appendChild(popover);
+    container.appendChild(menu);
+    updateRagDocumentBadge();
     document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
-}
-
-function createAllDocumentsChip() {
-    const item = document.createElement('label');
-    const checkbox = document.createElement('input');
-    const text = document.createElement('span');
-
-    item.className = 'rag-document-chip rag-document-chip-all';
-    checkbox.type = 'checkbox';
-    checkbox.id = 'ragAllDocuments';
-    checkbox.checked = true;
-    text.className = 'rag-document-name';
-    text.textContent = 'Todos';
-    checkbox.addEventListener('change', function() {
-        setAllDocumentCheckboxes(checkbox.checked);
-    });
-
-    item.appendChild(checkbox);
-    item.appendChild(text);
-
-    return item;
-}
-
-function syncAllDocumentsSelection() {
-    const allDocumentsCheckbox = document.getElementById('ragAllDocuments');
-    const documentCheckboxes = getDocumentCheckboxes();
-
-    if (!allDocumentsCheckbox) {
-        return;
-    }
-
-    allDocumentsCheckbox.checked = documentCheckboxes.length > 0
-        && documentCheckboxes.every((checkbox) => checkbox.checked);
 }
 
 function getSelectedDocumentCheckboxes() {
@@ -306,10 +371,31 @@ function getDocumentCheckboxes() {
     return Array.from(document.querySelectorAll('.rag-document-checkbox'));
 }
 
-function setAllDocumentCheckboxes(checked) {
-    getDocumentCheckboxes().forEach((documentCheckbox) => {
-        documentCheckbox.checked = checked;
+function toggleRagDocumentsMenu(menu, menuButton) {
+    const shouldOpen = !menu.classList.contains('open');
+
+    closeRagDocumentsMenu();
+    menu.classList.toggle('open', shouldOpen);
+    menuButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function closeRagDocumentsMenu() {
+    document.querySelectorAll('.rag-documents-menu.open').forEach((menu) => {
+        menu.classList.remove('open');
+        menu.querySelector('.rag-documents-menu-btn')?.setAttribute('aria-expanded', 'false');
     });
+}
+
+function updateRagDocumentBadge() {
+    const button = document.querySelector('.rag-documents-menu-btn');
+    const documentCheckboxes = getDocumentCheckboxes();
+    const selectedCount = getSelectedDocumentCheckboxes().length;
+    const label = `${selectedCount} ${selectedCount === 1 ? 'documento ativo' : 'documentos ativos'}`;
+
+    if (button) {
+        button.textContent = label;
+        button.classList.toggle('empty', documentCheckboxes.length > 0 && selectedCount === 0);
+    }
 }
 
 function setRagStatus(message, isError = false) {

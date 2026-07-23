@@ -296,13 +296,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'data_i
             throw new RuntimeException('Modelo inválido ou indisponível no Ollama local.');
         }
 
-        $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
         $ragDocumentIds = selectedRagDocumentIds();
-        $sampleChunks = $documentChunkRepository->sampleChunks(8, $useAllRagDocuments ? [] : $ragDocumentIds);
+
+        if ($ragDocumentIds === []) {
+            unset($_SESSION['olliverse_data_analyst_rag_sample']);
+            throw new RuntimeException('Selecione pelo menos um documento com conteúdo preparado.');
+        }
+
+        $sampleChunks = $documentChunkRepository->sampleChunks(8, $ragDocumentIds);
 
         if ($sampleChunks === []) {
             unset($_SESSION['olliverse_data_analyst_rag_sample']);
-            throw new RuntimeException('Selecione pelo menos um documento RAG com conteúdo indexado.');
+            throw new RuntimeException('O documento selecionado não tem conteúdo preparado.');
         }
 
         $sample = dataInsightRagSample($sampleChunks);
@@ -466,14 +471,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_prompt'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_context') {
     try {
         $prompt = trim((string) ($_POST['prompt'] ?? ''));
-        $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
         $ragDocumentIds = selectedRagDocumentIds();
 
         if ($prompt === '') {
             throw new RuntimeException('Mensagem vazia para consultar documentos.');
         }
 
-        if (!$useAllRagDocuments && $ragDocumentIds === []) {
+        if ($ragDocumentIds === []) {
             jsonResponse([
                 'success' => true,
                 'system_prompt' => $systemPrompt,
@@ -484,7 +488,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_co
         $ragChunks = $ragRetrievalService->retrieve(
             $prompt,
             3,
-            $useAllRagDocuments ? [] : $ragDocumentIds
+            $ragDocumentIds
         );
 
         jsonResponse([
@@ -545,16 +549,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'web_ai
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {
-    $ragEnabled = ($_POST['rag_enabled'] ?? '0') === '1';
-    $useAllRagDocuments = ($_POST['rag_all_documents'] ?? '0') === '1';
     $ragDocumentIds = selectedRagDocumentIds();
 
     $chatStreamHandler->handle(
         trim((string) $_POST['prompt']),
         trim((string) ($_POST['model'] ?? $defaultModel)),
         $availableModels,
-        $ragEnabled && ($useAllRagDocuments || $ragDocumentIds !== []),
-        $useAllRagDocuments ? [] : $ragDocumentIds
+        $ragDocumentIds !== [],
+        $ragDocumentIds
     );
 }
 

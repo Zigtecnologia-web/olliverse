@@ -22,7 +22,43 @@
             <h2>Histórico</h2>
             <span id="historyCount" class="history-count">0 conversas</span>
         </div>
-        <button type="button" id="historyCloseBtn" class="history-icon-btn" aria-label="Recolher histórico" title="Recolher histórico" data-tooltip="Recolher histórico"><?php echo iconSvg('sidebar'); ?></button>
+        <div class="history-sidebar-actions">
+            <button type="button" id="newChatBtn" class="new-chat-btn" aria-label="Nova conversa" title="Nova conversa" data-tooltip="Nova conversa"><?php echo iconSvg('plus'); ?></button>
+            <button type="button" id="historyCloseBtn" class="history-icon-btn" aria-label="Recolher histórico" title="Recolher histórico" data-tooltip="Recolher histórico"><?php echo iconSvg('sidebar'); ?></button>
+        </div>
+    </div>
+    <div class="workspace-tools" aria-label="Ferramentas da conversa">
+        <a class="config-btn" href="index.php?view=docs&amp;chat_id=<?php echo (int) $chatId; ?>" aria-label="Central de documentação" title="Central de documentação" data-tooltip="Central de documentação"><?php echo iconSvg('book-open'); ?></a>
+        <div class="plugins-menu" id="pluginsMenu">
+            <button type="button" id="pluginsMenuBtn" class="config-btn" aria-label="Gerenciar plugins" title="Gerenciar plugins" data-tooltip="Gerenciar plugins" aria-expanded="false"><?php echo iconSvg('puzzle'); ?></button>
+            <div class="plugins-menu-list" role="menu" aria-labelledby="pluginsMenuBtn">
+                <div class="plugins-menu-header">Plugins</div>
+                <?php if ($availablePlugins === []): ?>
+                    <div class="plugins-menu-empty">Nenhum plugin encontrado</div>
+                <?php else: ?>
+                    <?php foreach ($availablePlugins as $plugin): ?>
+                        <?php $pluginSlug = (string) $plugin['slug']; ?>
+                        <label class="plugin-toggle-item">
+                            <input type="checkbox" data-plugin-toggle="<?php echo htmlspecialchars($pluginSlug, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $plugin['active'] ? 'checked' : ''; ?>>
+                            <span class="toggle-track" aria-hidden="true"></span>
+                            <span class="plugin-toggle-label">
+                                <span class="plugin-toggle-name"><?php echo htmlspecialchars((string) ($plugin['icon'] ?? ''), ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars((string) ($plugin['name'] ?? $pluginSlug), ENT_QUOTES, 'UTF-8'); ?></span>
+                                <span class="plugin-toggle-description"><?php echo htmlspecialchars((string) ($plugin['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                            </span>
+                        </label>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <div id="pluginsStatus" class="plugins-status" aria-live="polite"></div>
+            </div>
+        </div>
+        <div class="export-menu" id="exportMenu">
+            <button type="button" id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" aria-expanded="false"><?php echo iconSvg('download'); ?></button>
+            <div class="export-menu-list" role="menu" aria-labelledby="exportChatBtn">
+                <a id="exportMarkdownLink" class="export-menu-item" role="menuitem" href="index.php?action=export_md&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file-text'); ?><span>Exportar como .md</span></a>
+                <a id="exportPdfLink" class="export-menu-item" role="menuitem" href="index.php?action=export_pdf&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file'); ?><span>Exportar como .pdf</span></a>
+            </div>
+        </div>
+        <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
     </div>
     <div class="history-search">
         <span class="history-search-icon" aria-hidden="true"><?php echo iconSvg('search'); ?></span>
@@ -34,9 +70,11 @@
 
 <div class="chat-container">
     <div class="chat-header">
-        <div class="header-title">
+        <div class="chat-header-row chat-header-main">
             <button type="button" id="historyToggleBtn" class="config-btn history-toggle-btn" aria-label="Abrir histórico" title="Abrir histórico" data-tooltip="Abrir histórico"><?php echo iconSvg('sidebar'); ?></button>
-            <h1>Olliverse</h1>
+            <div class="header-title">
+                <h1>Olliverse</h1>
+            </div>
             <div class="model-controls">
                 <div class="provider-field">
                     <label for="providerSelect">Motor</label>
@@ -66,69 +104,27 @@
                     </div>
                     <button type="button" id="modelInfoBtn" class="model-info-btn" aria-label="Informações do modelo" title="Informações do modelo" data-tooltip="Informações do modelo" <?php echo $availableModels ? '' : 'disabled'; ?>><?php echo iconSvg('info'); ?></button>
                 </div>
-                <div class="persona-field">
-                    <label for="personaSelect">Persona</label>
-                    <select id="personaSelect" class="persona-select">
-                        <?php foreach ($personas as $persona): ?>
-                            <option value="<?php echo (int) $persona['id']; ?>" <?php echo (int) $persona['id'] === (int) $activePersona['id'] ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars((string) $persona['name'], ENT_QUOTES, 'UTF-8'); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
             </div>
         </div>
-        <div class="header-actions">
-            <a class="config-btn" href="index.php?view=docs&amp;chat_id=<?php echo (int) $chatId; ?>" aria-label="Central de documentação" title="Central de documentação" data-tooltip="Central de documentação"><?php echo iconSvg('book-open'); ?></a>
-            <div class="plugins-menu" id="pluginsMenu">
-                <button type="button" id="pluginsMenuBtn" class="config-btn" aria-label="Gerenciar plugins" title="Gerenciar plugins" data-tooltip="Gerenciar plugins" aria-expanded="false"><?php echo iconSvg('puzzle'); ?></button>
-                <div class="plugins-menu-list" role="menu" aria-labelledby="pluginsMenuBtn">
-                    <div class="plugins-menu-header">Plugins</div>
-                    <?php if ($availablePlugins === []): ?>
-                        <div class="plugins-menu-empty">Nenhum plugin encontrado</div>
-                    <?php else: ?>
-                        <?php foreach ($availablePlugins as $plugin): ?>
-                            <?php $pluginSlug = (string) $plugin['slug']; ?>
-                            <label class="plugin-toggle-item">
-                                <input type="checkbox" data-plugin-toggle="<?php echo htmlspecialchars($pluginSlug, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $plugin['active'] ? 'checked' : ''; ?>>
-                                <span class="toggle-track" aria-hidden="true"></span>
-                                <span class="plugin-toggle-label">
-                                    <span class="plugin-toggle-name"><?php echo htmlspecialchars((string) ($plugin['icon'] ?? ''), ENT_QUOTES, 'UTF-8'); ?> <?php echo htmlspecialchars((string) ($plugin['name'] ?? $pluginSlug), ENT_QUOTES, 'UTF-8'); ?></span>
-                                    <span class="plugin-toggle-description"><?php echo htmlspecialchars((string) ($plugin['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
-                                </span>
-                            </label>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                    <div id="pluginsStatus" class="plugins-status" aria-live="polite"></div>
-                </div>
+        <div class="chat-header-row chat-session-bar">
+            <div class="persona-field">
+                <label for="personaSelect">Persona</label>
+                <select id="personaSelect" class="persona-select">
+                    <?php foreach ($personas as $persona): ?>
+                        <option value="<?php echo (int) $persona['id']; ?>" <?php echo (int) $persona['id'] === (int) $activePersona['id'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars((string) $persona['name'], ENT_QUOTES, 'UTF-8'); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
-            <div class="export-menu" id="exportMenu">
-                <button type="button" id="exportChatBtn" class="config-btn export-chat-btn" aria-label="Exportar conversa" title="Exportar conversa" data-tooltip="Exportar conversa" aria-expanded="false"><?php echo iconSvg('download'); ?></button>
-                <div class="export-menu-list" role="menu" aria-labelledby="exportChatBtn">
-                    <a id="exportMarkdownLink" class="export-menu-item" role="menuitem" href="index.php?action=export_md&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file-text'); ?><span>Exportar como .md</span></a>
-                    <a id="exportPdfLink" class="export-menu-item" role="menuitem" href="index.php?action=export_pdf&amp;chat_id=<?php echo (int) $chatId; ?>"><?php echo iconSvg('file'); ?><span>Exportar como .pdf</span></a>
-                </div>
-            </div>
-            <button type="button" id="settingsBtn" class="config-btn" aria-label="Biblioteca de personas" title="Biblioteca de personas" data-tooltip="Biblioteca de personas"><?php echo iconSvg('settings'); ?></button>
-            <button type="button" id="newChatBtn" class="new-chat-btn" aria-label="Nova conversa" title="Nova conversa" data-tooltip="Nova conversa"><?php echo iconSvg('plus'); ?></button>
-        </div>
-    </div>
-
-    <div class="rag-panel">
-        <div class="rag-panel-main">
-            <div class="rag-toggle-field">
-                <label class="toggle-switch" for="ragToggle">
-                    <input type="checkbox" id="ragToggle">
-                    <span class="toggle-track" aria-hidden="true"></span>
-                    <span class="toggle-label">Usar documentos</span>
-                </label>
-            </div>
+            <div class="rag-panel">
             <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
                 <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,.csv,.xlsx,.xls,text/*">
                 <button type="button" id="ragPickFileBtn" class="secondary-config-btn rag-add-document-btn" aria-label="Adicionar documento" title="Adicionar documento" data-tooltip="Adicionar documento"><?php echo iconSvg('file-plus'); ?></button>
                 <span id="ragStatus" class="rag-status" aria-live="polite"></span>
             </form>
             <div id="ragDocumentList" class="rag-document-list" aria-live="polite"></div>
+            </div>
         </div>
     </div>
 
@@ -218,6 +214,23 @@
         <div class="modal-footer">
             <button type="button" id="cancelDeleteChatBtn" class="secondary-config-btn">Não</button>
             <button type="button" id="confirmDeleteChatBtn" class="save-config-btn danger">Sim, deletar</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="deleteRagDocumentModal" aria-hidden="true">
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteRagDocumentModalTitle">
+        <div class="modal-header">
+            <h2 id="deleteRagDocumentModalTitle">Excluir documento</h2>
+            <button type="button" id="closeDeleteRagDocumentModalBtn" class="modal-close-btn" aria-label="Fechar confirmação"><?php echo iconSvg('x'); ?></button>
+        </div>
+        <div class="modal-body">
+            <p id="deleteRagDocumentModalText" class="confirm-modal-text">Deseja realmente excluir este documento?</p>
+            <div id="deleteRagDocumentStatus" class="skill-status" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" id="cancelDeleteRagDocumentBtn" class="secondary-config-btn">Não</button>
+            <button type="button" id="confirmDeleteRagDocumentBtn" class="save-config-btn danger">Sim, excluir</button>
         </div>
     </div>
 </div>
