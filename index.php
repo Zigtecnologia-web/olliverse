@@ -9,7 +9,6 @@ use App\Repositories\SqliteChatHistoryRepository;
 use App\Repositories\SqliteDocumentChunkRepository;
 use App\Repositories\SqliteConversationRepository;
 use App\Repositories\SqlitePersonaRepository;
-use App\Repositories\SqliteSearchRepository;
 use App\Services\ContextWindowService;
 use App\Services\DocumentationService;
 use App\Services\ModelMetadataService;
@@ -68,17 +67,70 @@ if (($_GET['action'] ?? '') === 'history') {
     ]);
 }
 
-if (($_GET['action'] ?? '') === 'search') {
+if (in_array(($_GET['action'] ?? ''), ['search', 'search_history'], true)) {
     $searchQuery = trim((string) ($_GET['q'] ?? ''));
-    $chatIds = $searchQuery === ''
-        ? []
-        : (new SqliteSearchRepository($pdo))->chatIdsForQuery($searchQuery);
+    $searchedChats = $searchQuery === '' ? $chatHistoryRepository->all() : $chatHistoryRepository->search($searchQuery);
 
     jsonResponse([
         'success' => true,
         'query' => $searchQuery,
-        'chat_ids' => $chatIds,
+        'chats' => $searchedChats,
+        'chat_ids' => array_map(static fn (array $chat): int => (int) $chat['id'], $searchedChats),
     ]);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'update_chat_title') {
+    try {
+        $titleChatId = (int) ($_POST['chat_id'] ?? 0);
+        $selectedModel = trim((string) ($_POST['model'] ?? $defaultModel));
+        $postedTitle = trim((string) ($_POST['title'] ?? ''));
+
+        if ($titleChatId <= 0 || !SqliteConversationRepository::exists($pdo, $titleChatId)) {
+            throw new RuntimeException('Conversa não encontrada para atualizar o título.');
+        }
+
+        if ($selectedModel === '' || ($availableModels && !in_array($selectedModel, $availableModels, true))) {
+            $selectedModel = $defaultModel;
+        }
+
+        $titleConversationRepository = new SqliteConversationRepository(
+            $pdo,
+            $contextWindowService,
+            $titleChatId,
+            $defaultModel
+        );
+
+        if ($postedTitle === '') {
+            if (!$titleConversationRepository->shouldGenerateTitle()) {
+                jsonResponse([
+                    'success' => true,
+                    'skipped' => true,
+                    'chat' => $chatHistoryRepository->find($titleChatId),
+                    'chats' => $chatHistoryRepository->all(),
+                ]);
+            }
+
+            $postedTitle = generateChatTitle(
+                $ollamaClient,
+                $selectedModel,
+                $titleConversationRepository->messages()
+            );
+        }
+
+        $updatedTitle = $titleConversationRepository->updateTitle($postedTitle);
+
+        jsonResponse([
+            'success' => true,
+            'title' => $updatedTitle,
+            'chat' => $chatHistoryRepository->find($titleChatId),
+            'chats' => $chatHistoryRepository->all(),
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
 }
 
 if (in_array(($_GET['action'] ?? ''), ['export', 'export_md'], true)) {
@@ -102,6 +154,7 @@ if (($_GET['action'] ?? '') === 'export_pdf') {
     $exportChatId = (int) ($_GET['chat_id'] ?? 0);
     $exportRepository = new SqliteChatExportRepository($pdo);
     $payload = $exportRepository->markdownPayload($exportChatId);
+    $chartImages = [];
 
     if ($payload === null) {
         http_response_code(404);
@@ -109,11 +162,19 @@ if (($_GET['action'] ?? '') === 'export_pdf') {
         exit;
     }
 
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        $postedImages = json_decode((string) ($_POST['chart_images'] ?? '[]'), true);
+
+        if (is_array($postedImages)) {
+            $chartImages = array_values(array_filter($postedImages, 'is_string'));
+        }
+    }
+
     $pdfExportService = new PdfExportService(__DIR__ . '/views/pdf/chat_template.php');
 
     header('Content-Type: application/pdf');
     header('Content-Disposition: attachment; filename="' . $pdfExportService->filename($payload['chat']) . '"');
-    echo $pdfExportService->render($payload);
+    echo $pdfExportService->render($payload, $chartImages);
     exit;
 }
 
@@ -536,6 +597,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'web_ai
 
         jsonResponse([
             'success' => true,
+            'chat' => $chatHistoryRepository->find($chatId),
             'messages' => $persistedMessages,
             'context_usage' => $contextWindowService->usage(
                 $contextWindowService->withSystemPrompt($systemPrompt, $persistedMessages)
@@ -599,6 +661,86 @@ function jsonResponse(array $payload, int $status = 200): never
     header('Content-Type: application/json; charset=UTF-8');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+/**
+ * @param array<int, array<string, string>> $messages
+ */
+function generateChatTitle(OllamaClient $ollamaClient, string $model, array $messages): string
+{
+    $conversationPreview = chatTitleConversationPreview($messages);
+
+    if ($conversationPreview === '') {
+        return 'Nova conversa';
+    }
+
+    $rawTitle = $ollamaClient->generate($model, implode("\n", [
+        'Crie um titulo curto em portugues para esta conversa.',
+        'Use apenas 3 a 5 palavras.',
+        'Nao use aspas, markdown, pontuacao final ou prefixos como "Titulo:".',
+        '',
+        'Conversa:',
+        $conversationPreview,
+        '',
+        'Titulo:',
+    ]));
+
+    return normalizeChatTitle($rawTitle);
+}
+
+/**
+ * @param array<int, array<string, string>> $messages
+ */
+function chatTitleConversationPreview(array $messages): string
+{
+    $previewLines = [];
+
+    foreach ($messages as $message) {
+        $role = ($message['role'] ?? '') === 'assistant' ? 'Assistente' : 'Usuario';
+        $content = trim(preg_replace('/\s+/', ' ', (string) ($message['content'] ?? '')) ?? '');
+
+        if ($content === '') {
+            continue;
+        }
+
+        $previewLines[] = $role . ': ' . shortenPlainText($content, 260);
+
+        if (count($previewLines) >= 4) {
+            break;
+        }
+    }
+
+    return implode("\n", $previewLines);
+}
+
+function normalizeChatTitle(string $title): string
+{
+    $title = preg_replace('/\s+/', ' ', trim($title)) ?? '';
+    $title = preg_replace('/^(titulo|título|title)\s*:\s*/iu', '', $title) ?? $title;
+    $title = trim($title, "\"'`*_#.:;,- ");
+    preg_match_all('/[\p{L}\p{N}][\p{L}\p{N}_+-]*/u', $title, $matches);
+    $words = array_slice($matches[0] ?? [], 0, 5);
+
+    if ($words === []) {
+        return 'Nova conversa';
+    }
+
+    return shortenPlainText(implode(' ', $words), 64);
+}
+
+function shortenPlainText(string $content, int $limit): string
+{
+    $content = trim(preg_replace('/\s+/', ' ', $content) ?? $content);
+
+    if (function_exists('mb_strlen') && mb_strlen($content, 'UTF-8') > $limit) {
+        return rtrim(mb_substr($content, 0, $limit - 3, 'UTF-8')) . '...';
+    }
+
+    if (!function_exists('mb_strlen') && strlen($content) > $limit) {
+        return rtrim(substr($content, 0, $limit - 3)) . '...';
+    }
+
+    return $content;
 }
 
 /**

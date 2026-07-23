@@ -355,10 +355,7 @@
             payload = normalizeChartValues(payload);
             validatePayload(payload);
         } catch (error) {
-            if (strict && rawJson.trim().startsWith('{')) {
-                host.replaceWith(createChartError(error.message || 'JSON de gráfico inválido.'));
-            }
-
+            logChartParseError(error, rawJson, strict);
             return;
         }
 
@@ -417,13 +414,35 @@
     }
 
     function parseChartJson(rawJson) {
-        const json = repairHighlightedJson(extractJsonObject(rawJson)) || '{}';
+        const cleanedJson = cleanChartJsonInput(rawJson);
+        const json = repairHighlightedJson(extractJsonObject(cleanedJson) || cleanedJson) || '{}';
 
         try {
             return JSON.parse(json);
         } catch (error) {
             return JSON.parse(stripJsonComments(json));
         }
+    }
+
+    function cleanChartJsonInput(rawJson) {
+        return String(rawJson || '')
+            .replace(/\r\n?/g, '\n')
+            .replace(/^\s*```(?:json-chart|json)?\s*/i, '')
+            .replace(/\s*```\s*$/i, '')
+            .replace(/^\s*(?:json-chart|json)\s*\n/i, '')
+            .trim();
+    }
+
+    function logChartParseError(error, rawJson, strict) {
+        if (typeof console === 'undefined' || typeof console.warn !== 'function') {
+            return;
+        }
+
+        console.warn('Falha ao interpretar o payload do gráfico.', {
+            strict,
+            message: error?.message || String(error),
+            raw: String(rawJson || '').slice(0, 500),
+        });
     }
 
     function repairHighlightedJson(json) {

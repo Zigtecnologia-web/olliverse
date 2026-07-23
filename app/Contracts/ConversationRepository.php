@@ -25,6 +25,11 @@ interface ConversationRepository
     public function clear(): void;
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function chatSummary(): ?array;
+
+    /**
      * @param array<int, array<string, string>> $messages
      */
     public function replaceConversation(array $messages, string $systemPrompt, string $model): bool;

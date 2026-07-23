@@ -335,6 +335,8 @@
         historySearchTimer: null,
         historySearchQuery: '',
         historySearchChatIds: null,
+        historySearchResults: null,
+        titleGenerationChatIds: new Set(),
         modelMetadataCache: new Map(),
     };
 </script>
@@ -343,11 +345,11 @@
 	<script src="public/assets/js/chat-stream.js"></script>
 	<script src="public/assets/js/web-ai-provider.js"></script>
 	<script src="public/assets/js/message-ui.js"></script>
-	<script src="public/assets/js/history-panel.js"></script>
+	<script src="public/assets/js/history-panel.js?v=<?php echo filemtime(__DIR__ . '/../public/assets/js/history-panel.js'); ?>"></script>
 	<script src="public/assets/js/rag-panel.js"></script>
 	<script src="public/assets/js/plugin-panel.js"></script>
 	<script src="public/assets/js/zen-mode.js"></script>
-	<script src="public/assets/js/app.js"></script>
+	<script src="public/assets/js/app.js?v=<?php echo filemtime(__DIR__ . '/../public/assets/js/app.js'); ?>"></script>
 
 </body>
 </html>

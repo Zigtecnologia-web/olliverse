@@ -106,6 +106,14 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         $this->replaceMessages([]);
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function chatSummary(): ?array
+    {
+        return (new SqliteChatHistoryRepository($this->pdo))->find($this->chatId);
+    }
+
     public function replaceConversation(array $messages, string $systemPrompt, string $model): bool
     {
         $contextWasTrimmed = false;
@@ -123,6 +131,62 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         });
 
         return $contextWasTrimmed;
+    }
+
+    public function updateTitle(string $title): string
+    {
+        $title = $this->shortenTitle($title, 64);
+
+        if ($title === '') {
+            throw new RuntimeException('Título vazio para atualização.');
+        }
+
+        $statement = $this->pdo->prepare('UPDATE chats SET title = :title WHERE id = :id');
+        $statement->execute([
+            'title' => $title,
+            'id' => $this->chatId,
+        ]);
+
+        return $title;
+    }
+
+    public function shouldGenerateTitle(): bool
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT
+                c.title,
+                (
+                    SELECT m.content
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.role = \'user\'
+                    ORDER BY m.id ASC
+                    LIMIT 1
+                ) AS first_user_message,
+                (
+                    SELECT COUNT(*)
+                    FROM messages m
+                    WHERE m.chat_id = c.id AND m.role = \'user\'
+                ) AS user_message_count
+             FROM chats c
+             WHERE c.id = :id
+             LIMIT 1'
+        );
+        $statement->execute(['id' => $this->chatId]);
+        $chat = $statement->fetch();
+
+        if (!is_array($chat)) {
+            return false;
+        }
+
+        $title = trim((string) ($chat['title'] ?? ''));
+        $firstUserTitle = $this->shorten((string) ($chat['first_user_message'] ?? ''));
+        $userMessageCount = (int) ($chat['user_message_count'] ?? 0);
+
+        if ($userMessageCount < 1 || $userMessageCount > 2) {
+            return false;
+        }
+
+        return $title === '' || $title === 'Nova conversa' || $title === $firstUserTitle;
     }
 
     public static function createChat(PDO $pdo, string $model, string $systemPrompt, ?int $personaId = null): int
@@ -223,10 +287,10 @@ final readonly class SqliteConversationRepository implements ConversationReposit
      */
     private function updateChatAfterInteraction(string $model, array $messages): void
     {
-        $title = $this->titleFromMessages($messages);
+        $title = $this->currentTitleKeepsPriority() ? null : $this->titleFromMessages($messages);
         $statement = $this->pdo->prepare(
             'UPDATE chats
-             SET title = :title, model_used = :model_used, updated_at = :updated_at
+             SET title = COALESCE(:title, title), model_used = :model_used, updated_at = :updated_at
              WHERE id = :id'
         );
         $statement->execute([
@@ -293,6 +357,46 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         }
 
         return $normalized;
+    }
+
+    private function shortenTitle(string $content, int $limit): string
+    {
+        $normalized = preg_replace('/\s+/', ' ', trim($content)) ?? trim($content);
+        $normalized = trim($normalized, "\"'`.:;,- ");
+
+        if (function_exists('mb_strlen') && mb_strlen($normalized, 'UTF-8') > $limit) {
+            return rtrim(mb_substr($normalized, 0, $limit - 3, 'UTF-8')) . '...';
+        }
+
+        if (!function_exists('mb_strlen') && strlen($normalized) > $limit) {
+            return rtrim(substr($normalized, 0, $limit - 3)) . '...';
+        }
+
+        return $normalized;
+    }
+
+    private function currentTitleKeepsPriority(): bool
+    {
+        $statement = $this->pdo->prepare('SELECT title FROM chats WHERE id = :id LIMIT 1');
+        $statement->execute(['id' => $this->chatId]);
+        $title = trim((string) $statement->fetchColumn());
+
+        return $title !== '' && $title !== 'Nova conversa' && !$this->isFirstMessageTitle($title);
+    }
+
+    private function isFirstMessageTitle(string $title): bool
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT content
+             FROM messages
+             WHERE chat_id = :chat_id AND role = \'user\'
+             ORDER BY id ASC
+             LIMIT 1'
+        );
+        $statement->execute(['chat_id' => $this->chatId]);
+        $firstMessage = $statement->fetchColumn();
+
+        return is_string($firstMessage) && $title === $this->shorten($firstMessage);
     }
 
     private function now(): string

@@ -83,6 +83,10 @@ function submitChatMessage(overridePrompt = null) {
                 updateContextUsage(payload.context_usage);
             }
 
+            if (payload.type === 'meta' && payload.chat) {
+                showHistoryChatAtTop(payload.chat);
+            }
+
             if (payload.type === 'rag_metadata') {
                 ragSources = payload.sources || [];
             }
@@ -99,7 +103,9 @@ function submitChatMessage(overridePrompt = null) {
     .then(() => {
         finalizeStreamingAssistantMessage(assistantMessage, assistantText);
         appendRagSources(assistantMessage.group, ragSources);
-        refreshChatHistory();
+        refreshChatHistory().then(() => {
+            maybeGenerateChatTitle(model);
+        });
     })
     .catch(error => {
         assistantMessage.group.remove();
@@ -354,10 +360,15 @@ function submitWebAiMessage(prompt) {
             { role: 'user', content: prompt },
             { role: 'assistant', content: assistantText },
         ];
+        if (payload.chat) {
+            showHistoryChatAtTop(payload.chat);
+        }
         if (payload.context_usage) {
             updateContextUsage(payload.context_usage);
         }
-        refreshChatHistory();
+        refreshChatHistory().then(() => {
+            maybeGenerateChatTitle(document.getElementById('modelSelect').value || '');
+        });
         setWebAiStatus(ragSources.length > 0 ? 'Web AI respondeu usando documentos.' : 'Web AI respondeu no navegador.');
     })
     .catch((error) => {
@@ -378,6 +389,56 @@ function submitWebAiMessage(prompt) {
         setRagDocumentControlsDisabled(false);
         updateProviderMode();
         inputEl.focus();
+    });
+}
+
+function maybeGenerateChatTitle(model) {
+    const chatId = Number(window.OlliverseConfig.chatId || 0);
+    const inFlight = window.OlliverseState.titleGenerationChatIds;
+
+    if (!chatId || !(inFlight instanceof Set) || inFlight.has(chatId)) {
+        return Promise.resolve();
+    }
+
+    inFlight.add(chatId);
+
+    const url = new URL(window.location.href);
+    const body = new URLSearchParams({
+        chat_id: String(chatId),
+        model: model || '',
+    });
+
+    url.search = '';
+    url.searchParams.set('action', 'update_chat_title');
+
+    return fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+        },
+        body: body.toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Erro ao gerar título.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        if (Array.isArray(payload.chats)) {
+            window.OlliverseConfig.initialChatHistory = payload.chats;
+            renderHistoryList(payload.chats);
+        } else if (payload.chat) {
+            replaceHistoryChat(payload.chat);
+        }
+    })
+    .catch((error) => {
+        console.debug(error.message || 'Título automático não foi gerado.');
+    })
+    .finally(() => {
+        inFlight.delete(chatId);
     });
 }
 
@@ -498,10 +559,7 @@ function createNewChat() {
         window.OlliverseConfig.initialChatHistory = payload.chats || window.OlliverseConfig.initialChatHistory;
         window.OlliverseConfig.initialMessages = payload.messages || [];
         window.OlliverseConfig.systemPrompt = String(window.OlliverseConfig.activePersona?.prompt_content || window.OlliverseConfig.systemPrompt || '');
-        window.OlliverseState.historySearchQuery = '';
-        window.OlliverseState.historySearchChatIds = null;
-        window.clearTimeout(window.OlliverseState.historySearchTimer);
-        document.getElementById('historySearchInput').value = '';
+        clearHistorySearch();
         renderLoadedChatMessages(payload.messages || []);
         updateContextUsage(payload.context_usage);
         renderPersonaSelect();

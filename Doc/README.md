@@ -33,7 +33,8 @@ Ele nao e apenas um chat simples. A arquitetura atual aponta para uma ferramenta
 - criar "modos de trabalho" por persona;
 - manter historico em SQLite;
 - usar a IA para tarefas tecnicas, escrita, analise e refatoracao;
-- evoluir futuramente para busca em historico, RAG, exportacao e organizacao mais avancada de chats.
+- buscar conversas salvas por titulo ou conteudo;
+- usar RAG, exportacao e organizacao avancada de chats.
 
 A ferramenta tem perfil de **cliente local privado**, com baixa dependencia externa. A unica dependencia operacional forte e o Ollama rodando localmente ou em uma URL configurada.
 
@@ -255,6 +256,17 @@ Exemplo:
 ```
 
 Se o `chat_id` nao existir, a aplicacao cria automaticamente uma nova conversa e redireciona para ela.
+
+### 8.3.1 Historico inteligente
+
+A barra lateral de historico possui busca instantanea. O frontend chama `GET ?action=search_history&q=...` enquanto o usuario digita e renderiza as conversas retornadas, sem recarregar a pagina.
+
+A busca considera correspondencias parciais em:
+
+- `chats.title`;
+- `messages.content`.
+
+Quando uma conversa nova recebe a primeira ou segunda interacao, o frontend chama `POST ?action=update_chat_title` em segundo plano. Se o titulo ainda for generico, o backend usa `/api/generate` do Ollama para criar um titulo curto, normaliza a resposta para 3 a 5 palavras e persiste o valor em `chats.title`. A sidebar e atualizada em seguida sem interromper o chat.
 
 ### 8.4 Nova conversa
 
@@ -695,9 +707,11 @@ Quando o plugin esta ligado:
 3. o frontend tambem recebe esses prompts em `activePluginPrompts` para orientar respostas da Web AI;
 4. o frontend carrega Chart.js local em `public/vendor/chart.js/chart.umd.js` e os assets do plugin sob demanda;
 5. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
-5. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
-6. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
-7. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado.
+6. quando o `data_analyst` esta ativo, o payload de chat enviado ao Ollama usa `options.temperature = 0.1` para reduzir variacoes sintaticas no bloco `json-chart`;
+7. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
+8. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
+9. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
+10. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos `json-chart` por imagens estaticas.
 
 O fluxo de inspecao opcional usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
@@ -748,9 +762,9 @@ Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o paylo
 
 A alternancia acontece apenas no JavaScript do navegador. Ela destroi a instancia Chart.js atual, recria o grafico escolhido quando necessario e nao dispara novas requisicoes para o Ollama. No modo tabela, o botao de download fica desabilitado porque nao ha canvas ativo para exportar como PNG.
 
-O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, incluindo remover comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
+O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, incluindo remover cercas Markdown residuais como `json-chart`/`json` e comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando um payload estrito nao pode ser interpretado, a falha fica registrada no console e o restante da mensagem Markdown continua renderizando normalmente. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
 
-Antes de entregar os dados ao Chart.js, o plugin converte valores em formato numerico comum ou brasileiro, como `8,5`, `1.234,56`, `12%` e `R$ 100`, para numeros JavaScript reais. Se algum valor nao puder ser convertido, o bloco mostra erro em vez de montar um canvas vazio.
+Antes de entregar os dados ao Chart.js, o plugin converte valores em formato numerico comum ou brasileiro, como `8,5`, `1.234,56`, `12%` e `R$ 100`, para numeros JavaScript reais. Se algum valor nao puder ser convertido, a falha fica no console e o restante da mensagem continua renderizando normalmente.
 
 O frontend tambem recupera alguns formatos imperfeitos comuns gerados pela IA, como blocos JSON soltos depois de um rotulo `json`, chaves com espacos (`" dados"`) e residuos visuais do highlighter (`class="code-number">`). Quando recebe uma lista de objetos com uma coluna de nome/grupo e varias metricas numericas, o plugin monta um grafico comparativo com datasets por grupo.
 
@@ -795,7 +809,52 @@ GET /index.php?clear=1
 
 No codigo atual, tambem cria uma nova conversa.
 
-### 9.4 Buscar metadados de modelo
+### 9.4 Buscar no historico
+
+```http
+GET /index.php?action=search_history&q=termo
+Accept: application/json
+```
+
+Retorna conversas cujo titulo ou conteudo das mensagens contenha o termo informado.
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "query": "termo",
+  "chats": [],
+  "chat_ids": []
+}
+```
+
+O endpoint antigo `action=search` continua funcionando como alias e retorna o mesmo payload.
+
+### 9.5 Atualizar titulo da conversa
+
+```http
+POST /index.php?action=update_chat_title
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+chat_id=1&model=llama3.2:latest
+```
+
+Quando `title` nao e enviado, o backend gera um titulo curto via Ollama usando as primeiras mensagens da conversa. Quando `title` e enviado, o valor e normalizado e persistido diretamente.
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "title": "Resumo Curto",
+  "chat": {},
+  "chats": []
+}
+```
+
+### 9.6 Buscar metadados de modelo
 
 ```http
 GET /index.php?action=model_metadata&model=llama3.2:latest
@@ -816,7 +875,7 @@ Resposta esperada:
 
 Campos podem vir como `null` quando o dado nao for encontrado.
 
-### 9.5 Exportar conversa em Markdown
+### 9.7 Exportar conversa em Markdown
 
 ```http
 GET /index.php?action=export_md&chat_id=1
@@ -824,7 +883,7 @@ GET /index.php?action=export_md&chat_id=1
 
 Retorna download `text/markdown` com o historico da conversa. O endpoint antigo `action=export` continua funcionando como alias para Markdown.
 
-### 9.6 Exportar conversa em PDF
+### 9.8 Exportar conversa em PDF
 
 ```http
 GET /index.php?action=export_pdf&chat_id=1
@@ -832,7 +891,9 @@ GET /index.php?action=export_pdf&chat_id=1
 
 Retorna download `application/pdf` gerado com Dompdf. O conteudo das mensagens passa por Parsedown em modo seguro e e renderizado no template `views/pdf/chat_template.php`.
 
-### 9.7 Enviar mensagem ao chat
+O mesmo endpoint tambem aceita `POST` com `chart_images` em JSON. Esse campo e usado pelo frontend da conversa atual para enviar imagens `data:image/png;base64,...` dos canvases Chart.js ativos, preservando os graficos no PDF no mesmo ponto em que os blocos `json-chart` aparecem no historico.
+
+### 9.9 Enviar mensagem ao chat
 
 ```http
 POST /index.php?chat_id=1
@@ -855,7 +916,7 @@ Linhas possiveis:
 {"type":"error","message":"erro amigavel","context_reset":false}
 ```
 
-### 9.8 Selecionar persona
+### 9.10 Selecionar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -875,7 +936,7 @@ Resposta:
 }
 ```
 
-### 9.9 Criar persona
+### 9.11 Criar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -886,7 +947,7 @@ persona_action=create&name=Nome&description=Descricao&prompt_content=Prompt
 
 Cria a persona e a define como ativa no chat atual.
 
-### 9.10 Atualizar persona
+### 9.12 Atualizar persona
 
 ```http
 POST /index.php?chat_id=1
@@ -897,7 +958,7 @@ persona_action=update&persona_id=2&name=Nome&description=Descricao&prompt_conten
 
 Atualiza a persona. Se ela for a persona ativa do chat atual, o chat passa a usar o prompt atualizado.
 
-### 9.11 Excluir persona
+### 9.13 Excluir persona
 
 ```http
 POST /index.php?chat_id=1
@@ -908,7 +969,7 @@ persona_action=delete&persona_id=2
 
 Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a persona fallback.
 
-### 9.12 Gerar system prompt de persona com IA
+### 9.14 Gerar system prompt de persona com IA
 
 ```http
 POST /index.php?chat_id=1&action=prompt_generate
@@ -944,7 +1005,7 @@ Erros retornam JSON com status `422`:
 }
 ```
 
-### 9.13 Atualizar system prompt diretamente
+### 9.15 Atualizar system prompt diretamente
 
 ```http
 POST /index.php?chat_id=1
@@ -955,7 +1016,7 @@ system_prompt=Novo%20prompt
 
 Este endpoint ainda existe. No comportamento atual, ele cria uma **Persona personalizada** a partir do prompt informado e associa essa persona ao chat.
 
-### 9.14 Abrir Central de Documentacao
+### 9.16 Abrir Central de Documentacao
 
 ```http
 GET /index.php?view=docs&chat_id=1
@@ -963,7 +1024,7 @@ GET /index.php?view=docs&chat_id=1
 
 Renderiza a Central de Documentacao com o conteudo de `Doc/README.md`.
 
-### 9.15 Ativar ou desativar plugin
+### 9.17 Ativar ou desativar plugin
 
 ```http
 POST /index.php?action=plugin_toggle
@@ -984,7 +1045,7 @@ Resposta esperada:
 
 O estado e salvo na sessao PHP e passa a valer para as proximas mensagens enviadas ao modelo.
 
-### 9.16 Gerenciar documentos adicionados
+### 9.18 Gerenciar documentos adicionados
 
 ```http
 GET /index.php?action=rag_documents_list
@@ -1019,7 +1080,7 @@ document_id=1
 
 O backend remove o documento de `rag_documents` e todos os chunks vinculados em `document_chunks`. Os endpoints antigos `action=rag_documents` e `action=rag_delete` continuam funcionando como aliases internos.
 
-### 9.17 Inspecionar dados para sugestoes analiticas
+### 9.19 Inspecionar dados para sugestoes analiticas
 
 ```http
 POST /index.php?action=data_insights
@@ -1155,7 +1216,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
 USING fts5(content, chat_id UNINDEXED)
 ```
 
-A tabela virtual `messages_fts` e mantida por triggers de insert, update e delete em `messages`. Ela alimenta a busca no historico sem alterar o fluxo principal de conversas.
+A tabela virtual `messages_fts` e mantida por triggers de insert, update e delete em `messages`. A busca atual da sidebar usa comparacao parcial em `chats.title` e `messages.content`, e a FTS permanece disponivel para evolucoes de ranking e busca textual mais avancada.
 
 ### 10.7 Indices
 
@@ -1280,6 +1341,7 @@ Responsavel por gerar o PDF de uma conversa.
 Faz:
 
 - converter conteudo Markdown das mensagens com Parsedown em modo seguro;
+- substituir blocos `json-chart` por imagens PNG recebidas do frontend durante a exportacao analitica;
 - carregar `views/pdf/chat_template.php`;
 - configurar Dompdf para pagina A4;
 - devolver o binario usado pelo endpoint `action=export_pdf`.
@@ -1626,6 +1688,8 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Destaca blocos de codigo.
 - [x] Sanitiza HTML renderizado.
 - [x] Persiste mensagens no SQLite.
+- [x] Busca conversas por titulo ou conteudo das mensagens.
+- [x] Gera titulo curto automaticamente para conversas novas.
 - [x] Calcula uso estimado de contexto.
 - [x] Remove mensagens antigas quando excede limite.
 - [x] Reseta contexto em erro especifico de janela do Ollama.

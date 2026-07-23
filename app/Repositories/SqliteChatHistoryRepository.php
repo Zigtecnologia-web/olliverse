@@ -17,28 +17,66 @@ final readonly class SqliteChatHistoryRepository
      */
     public function all(): array
     {
-        $statement = $this->pdo->query(
-            'SELECT
-                c.id,
-                c.title,
-                c.model_used,
-                c.created_at,
-                c.updated_at,
-                (
-                    SELECT m.content
-                    FROM messages m
-                    WHERE m.chat_id = c.id AND m.role = \'user\'
-                    ORDER BY m.id ASC
-                    LIMIT 1
-                ) AS first_user_message,
-                (
-                    SELECT COUNT(*)
-                    FROM messages m
-                    WHERE m.chat_id = c.id
-                ) AS message_count
-             FROM chats c
-             ORDER BY datetime(c.updated_at) DESC, c.id DESC'
+        return $this->chatsForWhere('');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function search(string $query): array
+    {
+        $query = trim($query);
+
+        if ($query === '') {
+            return $this->all();
+        }
+
+        return $this->chatsForWhere(
+            'WHERE c.title LIKE :query ESCAPE \'\\\'
+                OR EXISTS (
+                    SELECT 1
+                    FROM messages search_messages
+                    WHERE search_messages.chat_id = c.id
+                        AND search_messages.content LIKE :query ESCAPE \'\\\'
+                )',
+            ['query' => '%' . $this->escapeLike($query) . '%']
         );
+    }
+
+    /**
+     * @param array<string, string> $parameters
+     * @return array<int, array<string, mixed>>
+     */
+    private function chatsForWhere(string $whereSql, array $parameters = []): array
+    {
+        $sql = 'SELECT
+            c.id,
+            c.title,
+            c.model_used,
+            c.created_at,
+            c.updated_at,
+            (
+                SELECT m.content
+                FROM messages m
+                WHERE m.chat_id = c.id AND m.role = \'user\'
+                ORDER BY m.id ASC
+                LIMIT 1
+            ) AS first_user_message,
+            (
+                SELECT COUNT(*)
+                FROM messages m
+                WHERE m.chat_id = c.id
+            ) AS message_count
+         FROM chats c
+         ' . $whereSql . '
+         ORDER BY datetime(c.updated_at) DESC, c.id DESC';
+
+        if ($parameters !== []) {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute($parameters);
+        } else {
+            $statement = $this->pdo->query($sql);
+        }
 
         return array_map(
             fn (array $chat): array => $this->normalize($chat),
@@ -132,5 +170,10 @@ final readonly class SqliteChatHistoryRepository
         }
 
         return $normalized;
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
     }
 }

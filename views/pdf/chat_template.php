@@ -116,6 +116,22 @@ $model = (string) ($chat['model_used'] ?? '');
             margin: 8px 0;
             padding-left: 10px;
         }
+
+        .chart-export-figure {
+            background: #121214;
+            border: 1px solid #d6d9dc;
+            border-radius: 6px;
+            margin: 10px 0;
+            padding: 10px;
+            page-break-inside: avoid;
+            text-align: center;
+        }
+
+        .chart-export-figure img {
+            display: block;
+            height: auto;
+            max-width: 100%;
+        }
     </style>
 </head>
 <body>

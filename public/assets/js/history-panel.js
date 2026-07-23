@@ -13,9 +13,10 @@ function initHistoryPanel() {
         toggleExportMenu();
     });
     document.getElementById('exportMarkdownLink').addEventListener('click', closeExportMenu);
-    document.getElementById('exportPdfLink').addEventListener('click', function() {
+    document.getElementById('exportPdfLink').addEventListener('click', function(event) {
+        event.preventDefault();
         closeExportMenu();
-        markPdfExportLoading(this);
+        exportPdfWithCharts(this);
     });
     document.getElementById('historyToggleBtn').addEventListener('click', function() {
         setHistoryOpen(true);
@@ -62,9 +63,25 @@ function queueHistorySearch(query) {
     }, 300);
 }
 
+function clearHistorySearch() {
+    const searchInput = document.getElementById('historySearchInput');
+
+    window.OlliverseState.historySearchQuery = '';
+    window.OlliverseState.historySearchChatIds = null;
+    window.OlliverseState.historySearchResults = null;
+    window.clearTimeout(window.OlliverseState.historySearchTimer);
+
+    if (searchInput) {
+        searchInput.value = '';
+    }
+
+    setHistoryStatus('');
+}
+
 function searchChatHistory(query) {
     if (!query) {
         window.OlliverseState.historySearchChatIds = null;
+        window.OlliverseState.historySearchResults = null;
         renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
         setHistoryStatus('');
         return;
@@ -74,7 +91,7 @@ function searchChatHistory(query) {
 
     const url = new URL(window.location.href);
     url.search = '';
-    url.searchParams.set('action', 'search');
+    url.searchParams.set('action', 'search_history');
     url.searchParams.set('q', query);
 
     fetch(url.toString(), {
@@ -90,9 +107,12 @@ function searchChatHistory(query) {
         return payload;
     }))
     .then((payload) => {
-        window.OlliverseState.historySearchChatIds = new Set((payload.chat_ids || []).map(Number));
-        renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
-        setHistoryStatus(payload.chat_ids.length === 0 ? 'Nenhuma conversa encontrada.' : '');
+        const chats = Array.isArray(payload.chats) ? payload.chats : [];
+
+        window.OlliverseState.historySearchResults = chats;
+        window.OlliverseState.historySearchChatIds = new Set((payload.chat_ids || chats.map((chat) => chat.id)).map(Number));
+        renderHistoryList(chats);
+        setHistoryStatus(chats.length === 0 ? 'Nenhuma conversa encontrada.' : '');
     })
     .catch((error) => {
         setHistoryStatus(error.message || 'Erro ao buscar no histórico.', true);
@@ -133,7 +153,7 @@ function refreshChatHistory() {
 
 function renderHistoryList(chats) {
     const list = document.getElementById('historyList');
-    const filteredChats = filteredHistoryChats(chats);
+    const filteredChats = sortHistoryChats(filteredHistoryChats(chats));
     const groups = groupHistoryChats(filteredChats);
 
     list.innerHTML = '';
@@ -164,6 +184,10 @@ function renderHistoryList(chats) {
 }
 
 function filteredHistoryChats(chats) {
+    if (Array.isArray(window.OlliverseState.historySearchResults)) {
+        return window.OlliverseState.historySearchResults;
+    }
+
     const chatIds = window.OlliverseState.historySearchChatIds;
 
     if (!(chatIds instanceof Set)) {
@@ -171,6 +195,72 @@ function filteredHistoryChats(chats) {
     }
 
     return chats.filter((chat) => chatIds.has(Number(chat.id)));
+}
+
+function replaceHistoryChat(updatedChat) {
+    const chatId = Number(updatedChat?.id || 0);
+
+    if (!chatId) {
+        return;
+    }
+
+    window.OlliverseConfig.initialChatHistory = upsertHistoryChat(
+        window.OlliverseConfig.initialChatHistory || [],
+        updatedChat
+    );
+
+    if (Array.isArray(window.OlliverseState.historySearchResults)) {
+        window.OlliverseState.historySearchResults = upsertHistoryChat(
+            window.OlliverseState.historySearchResults,
+            updatedChat
+        );
+    }
+
+    renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
+}
+
+function showHistoryChatAtTop(updatedChat) {
+    clearHistorySearch();
+    replaceHistoryChat(updatedChat);
+}
+
+function upsertHistoryChat(chats, updatedChat) {
+    const chatId = Number(updatedChat?.id || 0);
+    let found = false;
+    const nextChats = (chats || []).map((chat) => {
+        if (Number(chat.id) !== chatId) {
+            return chat;
+        }
+
+        found = true;
+        return updatedChat;
+    });
+
+    if (!found) {
+        nextChats.push(updatedChat);
+    }
+
+    return sortHistoryChats(nextChats);
+}
+
+function sortHistoryChats(chats) {
+    return [...(chats || [])].sort((left, right) => {
+        const rightTime = historySortTime(right);
+        const leftTime = historySortTime(left);
+
+        if (rightTime !== leftTime) {
+            return rightTime - leftTime;
+        }
+
+        return Number(right.id || 0) - Number(left.id || 0);
+    });
+}
+
+function historySortTime(chat) {
+    const updatedAt = parseSqliteDate(chat?.updated_at);
+    const createdAt = parseSqliteDate(chat?.created_at);
+
+    return updatedAt.getTime() || createdAt.getTime() || 0;
 }
 
 function groupHistoryChats(chats) {
@@ -191,7 +281,7 @@ function groupHistoryChats(chats) {
         const createdAt = parseSqliteDate(chat.created_at);
         const day = startOfDay(createdAt);
 
-        if (day.getTime() === today.getTime()) {
+        if (day >= today) {
             groups.Hoje.push(chat);
         } else if (day.getTime() === yesterday.getTime()) {
             groups.Ontem.push(chat);
@@ -261,7 +351,14 @@ function createHistoryChatItem(chat) {
     pdfLink.className = 'history-action-menu-item';
     pdfLink.href = `${window.location.pathname}?action=export_pdf&chat_id=${Number(chat.id)}`;
     pdfLink.innerHTML = `${iconSvg('file')}<span>Exportar .pdf</span>`;
-    pdfLink.addEventListener('click', function() {
+    pdfLink.addEventListener('click', function(event) {
+        if (Number(chat.id) === Number(window.OlliverseConfig.chatId || 0)) {
+            event.preventDefault();
+            closeHistoryMenus();
+            exportPdfWithCharts(this);
+            return;
+        }
+
         closeHistoryMenus();
         markPdfExportLoading(this);
     });
@@ -502,6 +599,61 @@ function updateExportLink() {
     exportButton.disabled = chatId <= 0;
     markdownLink.classList.toggle('disabled', chatId <= 0);
     pdfLink.classList.toggle('disabled', chatId <= 0);
+}
+
+function exportPdfWithCharts(link) {
+    if (!link || link.classList.contains('disabled')) {
+        return;
+    }
+
+    markPdfExportLoading(link);
+
+    const chartImages = collectActiveChartImages();
+    const form = document.createElement('form');
+    const imageInput = document.createElement('input');
+
+    form.method = 'POST';
+    form.action = link.href;
+    form.hidden = true;
+
+    imageInput.type = 'hidden';
+    imageInput.name = 'chart_images';
+    imageInput.value = JSON.stringify(chartImages);
+
+    form.appendChild(imageInput);
+    document.body.appendChild(form);
+    form.submit();
+
+    window.setTimeout(() => {
+        form.remove();
+        link.classList.remove('loading');
+    }, 1400);
+}
+
+function collectActiveChartImages() {
+    return Array.from(document.querySelectorAll('#chatMessages .plugin-chart-wrapper'))
+        .map((wrapper) => {
+            const canvas = wrapper.querySelector('canvas.dynamic-chart-canvas');
+            const chart = wrapper._olliverseChartInstance;
+
+            if (canvas?.hidden || canvas?.offsetParent === null) {
+                return '';
+            }
+
+            try {
+                if (chart && typeof chart.toBase64Image === 'function') {
+                    return chart.toBase64Image('image/png', 1);
+                }
+
+                if (!canvas) {
+                    return '';
+                }
+
+                return canvas.toDataURL('image/png');
+            } catch (error) {
+                return '';
+            }
+        });
 }
 
 function setHistoryStatus(message, isError = false) {

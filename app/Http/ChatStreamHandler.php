@@ -109,7 +109,7 @@ final readonly class ChatStreamHandler
                     'model' => $selectedModel,
                     'messages' => $messagesForContext,
                     'stream' => true,
-                ], static function (array $payload): void {
+                ] + $this->chatOptions(), static function (array $payload): void {
                     NdjsonResponse::emit($payload);
                 });
             } catch (OllamaStreamException $error) {
@@ -141,6 +141,7 @@ final readonly class ChatStreamHandler
 
             NdjsonResponse::emit([
                 'type' => 'meta',
+                'chat' => $this->conversationRepository->chatSummary(),
                 'context_usage' => $this->contextWindowService->usage(
                     $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages)
                 ),
@@ -213,5 +214,21 @@ final readonly class ChatStreamHandler
         }
 
         return trim($systemPrompt . "\n\n" . implode("\n\n", $pluginPrompts));
+    }
+
+    /**
+     * @return array<string, array<string, float>>
+     */
+    private function chatOptions(): array
+    {
+        if (!$this->pluginManager?->isActive('data_analyst')) {
+            return [];
+        }
+
+        return [
+            'options' => [
+                'temperature' => 0.1,
+            ],
+        ];
     }
 }
