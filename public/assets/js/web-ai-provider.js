@@ -18,7 +18,7 @@ window.OlliverseWebAI = {
 
         onStatus?.('Preparando a Web AI no navegador...');
 
-        const webLlm = await import('https://esm.run/@mlc-ai/web-llm');
+        const webLlm = await import('./public/vendor/web-llm/web-llm.js');
         const createEngine = webLlm.CreateMLCEngine || webLlm.CreateWebWorkerMLCEngine;
 
         if (typeof createEngine !== 'function') {

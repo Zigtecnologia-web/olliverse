@@ -12,6 +12,7 @@ initHistoryPanel();
 initRagPanel();
 initPluginPanel();
 initProviderSelector();
+initZenMode();
 
 function submitChatMessage(overridePrompt = null) {
     const inputEl = document.getElementById('userInput');

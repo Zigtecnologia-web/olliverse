@@ -1,18 +1,23 @@
 function initRagPanel() {
     renderRagDocuments(window.OlliverseConfig.initialRagDocuments || []);
+    initRagManagerModal();
     initRagDeleteModal();
 
     const form = document.getElementById('ragUploadForm');
     const fileInput = document.getElementById('ragFileInput');
     const pickFileBtn = document.getElementById('ragPickFileBtn');
+    const managerBtn = document.getElementById('ragManagerBtn');
 
     if (typeof attachActionTooltip === 'function') {
-        attachActionTooltip(pickFileBtn);
+        if (pickFileBtn) attachActionTooltip(pickFileBtn);
+        if (managerBtn) attachActionTooltip(managerBtn);
     }
 
-    pickFileBtn.addEventListener('click', function() {
+    pickFileBtn?.addEventListener('click', function() {
         fileInput.click();
     });
+
+    managerBtn?.addEventListener('click', openRagManagerModal);
 
     fileInput.addEventListener('change', function() {
         const fileName = fileInput.files?.[0]?.name || '';
@@ -33,6 +38,22 @@ function initRagPanel() {
     document.addEventListener('click', function(event) {
         if (!event.target.closest('.rag-documents-menu')) {
             closeRagDocumentsMenu();
+        }
+    });
+}
+
+function initRagManagerModal() {
+    const modal = document.getElementById('ragManagerModal');
+    const closeButton = document.getElementById('closeRagManagerModalBtn');
+
+    if (!modal || !closeButton) {
+        return;
+    }
+
+    closeButton.addEventListener('click', closeRagManagerModal);
+    modal.addEventListener('click', function(event) {
+        if (event.target === event.currentTarget) {
+            closeRagManagerModal();
         }
     });
 }
@@ -65,7 +86,7 @@ function getSelectedRagDocumentIds() {
 
 function setRagDocumentControlsDisabled(disabled) {
     document
-        .querySelectorAll('.rag-document-checkbox, .rag-delete-btn, .rag-documents-menu-btn')
+        .querySelectorAll('.rag-document-checkbox, .rag-delete-btn, .rag-manager-delete-btn, .rag-documents-menu-btn, #ragManagerBtn')
         .forEach((control) => {
             control.disabled = disabled;
         });
@@ -108,6 +129,7 @@ function uploadRagDocument() {
     .then((payload) => {
         fileInput.value = '';
         renderRagDocuments(payload.documents || []);
+        renderRagManagerDocuments(payload.documents || []);
         setRagStatus(`${payload.document.source_name} pronto para consulta.`);
     })
     .catch((error) => {
@@ -271,6 +293,7 @@ function deleteRagDocumentRequest(documentId, sourceName, callbacks = {}) {
     }))
     .then((payload) => {
         renderRagDocuments(payload.documents || []);
+        renderRagManagerDocuments(payload.documents || []);
         setRagStatus(`${sourceName} excluído dos documentos adicionados.`);
         callbacks.onSuccess?.();
     })
@@ -361,6 +384,170 @@ function renderRagDocuments(documents) {
     container.appendChild(menu);
     updateRagDocumentBadge();
     document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
+}
+
+function openRagManagerModal() {
+    const modal = document.getElementById('ragManagerModal');
+
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    document.getElementById('closeRagManagerModalBtn')?.focus();
+    loadRagManagerDocuments();
+}
+
+function closeRagManagerModal() {
+    const modal = document.getElementById('ragManagerModal');
+
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function loadRagManagerDocuments() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('action', 'rag_documents_list');
+    setRagManagerStatus('Carregando documentos...');
+
+    fetch(url.toString())
+        .then((response) => response.json().then((payload) => {
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || 'Não foi possível carregar os documentos.');
+            }
+
+            return payload;
+        }))
+        .then((payload) => {
+            renderRagDocuments(payload.documents || []);
+            renderRagManagerDocuments(payload.documents || []);
+            setRagManagerStatus('');
+        })
+        .catch((error) => {
+            setRagManagerStatus(error.message || 'Erro ao carregar documentos.', true);
+        });
+}
+
+function renderRagManagerDocuments(documents) {
+    const container = document.getElementById('ragManagerContent');
+
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
+    if (!documents.length) {
+        const empty = document.createElement('div');
+        empty.className = 'rag-manager-empty';
+        empty.textContent = 'Nenhum documento adicionado até o momento.';
+        container.appendChild(empty);
+        return;
+    }
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const tbody = document.createElement('tbody');
+    const headerRow = document.createElement('tr');
+
+    table.className = 'rag-manager-table';
+    ['Arquivo', 'Chunks', 'Adicionado em', 'Espaço', ''].forEach((label) => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+
+    documents.forEach((documentInfo) => {
+        const row = document.createElement('tr');
+        const documentId = Number(documentInfo.id || 0);
+        const sourceName = documentInfo.source_name || 'Documento';
+        const values = [
+            sourceName,
+            String(Number(documentInfo.chunks || 0)),
+            formatRagDocumentDate(documentInfo.created_at),
+            formatBytes(Number(documentInfo.estimated_bytes || 0)),
+        ];
+
+        values.forEach((value) => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+
+        const actionCell = document.createElement('td');
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'rag-manager-delete-btn';
+        deleteButton.setAttribute('aria-label', `Excluir ${sourceName}`);
+        deleteButton.title = `Excluir ${sourceName}`;
+        deleteButton.innerHTML = '<span aria-hidden="true">x</span>';
+        deleteButton.addEventListener('click', function() {
+            deleteRagDocument(documentId, sourceName);
+        });
+        actionCell.appendChild(deleteButton);
+        row.appendChild(actionCell);
+        tbody.appendChild(row);
+    });
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    container.appendChild(table);
+}
+
+function setRagManagerStatus(message, isError = false) {
+    const status = document.getElementById('ragManagerStatus');
+
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.classList.toggle('error', isError);
+}
+
+function formatRagDocumentDate(value) {
+    const text = String(value || '').trim();
+
+    if (text === '') {
+        return '-';
+    }
+
+    const date = new Date(text.replace(' ', 'T'));
+
+    if (Number.isNaN(date.getTime())) {
+        return text;
+    }
+
+    return date.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIndex = 0;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function getSelectedDocumentCheckboxes() {

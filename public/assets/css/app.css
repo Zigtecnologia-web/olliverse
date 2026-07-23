@@ -15,6 +15,10 @@ body {
     padding: 20px;
 }
 
+body.zen-mode-body {
+    padding: 0;
+}
+
 body.documentation-body {
     align-items: flex-start;
     display: block;
@@ -30,6 +34,7 @@ body.documentation-body {
     height: calc(100vh - 45px);
     margin-top: 5px;
     max-width: 1420px;
+    transition: gap 0.24s ease, max-width 0.24s ease, grid-template-columns 0.24s ease;
     width: 100%;
 }
 
@@ -51,6 +56,7 @@ body.documentation-body {
     flex-direction: column;
     min-width: 0;
     overflow: hidden;
+    transition: border-color 0.24s ease, opacity 0.2s ease, transform 0.24s ease;
 }
 
 .history-collapsed .history-sidebar {
@@ -572,6 +578,7 @@ a.history-action-menu-item {
     flex-direction: column;
     overflow: hidden;
     border: 1px solid #29292e;
+    transition: border-radius 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
 }
 
 .chat-header {
@@ -580,6 +587,7 @@ a.history-action-menu-item {
     display: grid;
     gap: 0;
     padding: 0;
+    transition: background-color 0.24s ease, border-color 0.24s ease;
 }
 
 .chat-header-row {
@@ -592,12 +600,14 @@ a.history-action-menu-item {
 .chat-header-main {
     justify-content: space-between;
     padding: 14px 20px;
+    transition: min-height 0.24s ease, padding 0.24s ease;
 }
 
 .chat-session-bar {
     background-color: #202027;
     border-top: 1px solid #323238;
     padding: 10px 20px;
+    transition: max-height 0.24s ease, opacity 0.18s ease, padding 0.24s ease;
 }
 
 .header-title {
@@ -605,6 +615,7 @@ a.history-action-menu-item {
     align-items: center;
     flex: 0 0 auto;
     min-width: 0;
+    transition: opacity 0.18s ease;
 }
 
 .chat-header h1 {
@@ -621,6 +632,82 @@ a.history-action-menu-item {
     gap: 10px;
     justify-content: flex-end;
     min-width: 0;
+    transition: opacity 0.18s ease;
+}
+
+.zen-mode-btn {
+    flex: 0 0 36px;
+}
+
+.zen-mode-btn svg {
+    height: 17px;
+    width: 17px;
+}
+
+.app-shell.zen-mode-active {
+    gap: 0;
+    grid-template-columns: 0 minmax(0, 1fr);
+    height: 100vh;
+    margin-top: 0;
+    max-width: 100%;
+}
+
+.app-shell.zen-mode-active .history-sidebar {
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-18px);
+}
+
+.app-shell.zen-mode-active .chat-container {
+    border-color: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-shell.zen-mode-active .chat-header {
+    background-color: #202027;
+    border-bottom-color: #29292e;
+}
+
+.app-shell.zen-mode-active .chat-header-main {
+    justify-content: flex-end;
+    min-height: 42px;
+    padding: 4px 12px;
+}
+
+.app-shell.zen-mode-active .history-toggle-btn,
+.app-shell.zen-mode-active .header-title,
+.app-shell.zen-mode-active .model-controls,
+.app-shell.zen-mode-active .chat-session-bar {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.app-shell.zen-mode-active .history-toggle-btn,
+.app-shell.zen-mode-active .header-title,
+.app-shell.zen-mode-active .model-controls {
+    display: none;
+}
+
+.app-shell.zen-mode-active .chat-session-bar {
+    max-height: 0;
+    overflow: hidden;
+    padding-bottom: 0;
+    padding-top: 0;
+}
+
+.app-shell.zen-mode-active .chat-messages {
+    padding-left: clamp(16px, 4vw, 48px);
+    padding-right: clamp(16px, 4vw, 48px);
+}
+
+.app-shell.zen-mode-active .message-group {
+    max-width: min(100%, 1180px);
+}
+
+.app-shell.zen-mode-active .message-group.user {
+    max-width: min(82%, 760px);
 }
 
 .model-field {
@@ -1207,7 +1294,8 @@ a.history-action-menu-item {
     display: none;
 }
 
-.rag-upload-form .rag-add-document-btn {
+.rag-upload-form .rag-add-document-btn,
+.rag-upload-form .rag-manager-btn {
     align-items: center;
     display: inline-flex;
     flex: 0 0 30px;
@@ -1218,7 +1306,8 @@ a.history-action-menu-item {
     width: 30px;
 }
 
-.rag-add-document-btn svg {
+.rag-add-document-btn svg,
+.rag-manager-btn svg {
     height: 20px;
     width: 20px;
 }
@@ -1317,6 +1406,35 @@ a.config-btn {
 .documentation-back-link {
     flex: 0 0 auto;
     text-decoration: none;
+}
+
+.documentation-tabs {
+    background-color: #1a1a20;
+    border: 1px solid #29292e;
+    border-radius: 8px;
+    display: inline-flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    padding: 4px;
+}
+
+.documentation-tabs a {
+    border-radius: 6px;
+    color: #a8a8b3;
+    font-size: 0.86rem;
+    font-weight: 700;
+    min-width: 108px;
+    padding: 9px 14px;
+    text-align: center;
+    text-decoration: none;
+}
+
+.documentation-tabs a:hover,
+.documentation-tabs a:focus,
+.documentation-tabs a.active {
+    background-color: rgba(4, 211, 97, 0.1);
+    color: #04d361;
+    outline: none;
 }
 
 .documentation-layout {
@@ -1455,6 +1573,98 @@ a.config-btn {
 .documentation-content th {
     background-color: #25252b;
     color: #e1e1e6;
+}
+
+.product-documentation {
+    background: #1e1e24;
+    padding: 0;
+}
+
+.product-documentation > * {
+    margin-left: 24px;
+    margin-right: 24px;
+}
+
+.product-documentation > h1:first-child {
+    background-color: #151519;
+    border-bottom: 1px solid #29292e;
+    color: #e1e1e6;
+    font-size: clamp(2rem, 5vw, 3.6rem);
+    line-height: 1;
+    margin: 0;
+    padding: 44px 24px 8px;
+}
+
+.product-documentation > h1:first-child + h2 {
+    background-color: #151519;
+    border-top: 0;
+    color: #04d361;
+    font-size: clamp(1.15rem, 2vw, 1.55rem);
+    margin: 0;
+    padding: 0 24px 18px;
+}
+
+.product-documentation > h1:first-child + h2 + p {
+    background-color: #151519;
+    color: #c4c4cc;
+    font-size: 1.02rem;
+    line-height: 1.75;
+    margin: 0;
+    max-width: none;
+    padding: 0 24px 12px;
+}
+
+.product-documentation > h1:first-child + h2 + p + p {
+    background-color: #151519;
+    color: #a8a8b3;
+    font-size: 0.98rem;
+    line-height: 1.7;
+    margin: 0;
+    padding: 0 24px 38px;
+}
+
+.product-documentation h2 {
+    border-top: 1px solid #29292e;
+    color: #e1e1e6;
+    font-size: 1.28rem;
+    margin-top: 30px;
+    padding-top: 26px;
+}
+
+.product-documentation h3 {
+    color: #04d361;
+    font-size: 1rem;
+}
+
+.product-documentation p {
+    max-width: 760px;
+}
+
+.product-documentation ul {
+    display: grid;
+    gap: 10px;
+    list-style: none;
+    padding-left: 0;
+}
+
+.product-documentation li {
+    background-color: #202027;
+    border: 1px solid #323238;
+    border-radius: 8px;
+    color: #d4d4dc;
+    padding: 12px 14px;
+}
+
+.product-documentation ol {
+    display: grid;
+    gap: 10px;
+    list-style-position: inside;
+    padding-left: 0;
+}
+
+.product-documentation ol li::marker {
+    color: #04d361;
+    font-weight: 800;
 }
 
 .chat-messages {
@@ -2014,6 +2224,17 @@ a.config-btn {
     width: 100%;
 }
 
+.rag-manager-modal {
+    background-color: #1e1e24;
+    border: 1px solid #323238;
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+    max-height: min(720px, 92vh);
+    max-width: 760px;
+    overflow-y: auto;
+    width: 100%;
+}
+
 .confirm-modal-text {
     color: #c4c4cc;
     font-size: 0.92rem;
@@ -2027,6 +2248,85 @@ a.config-btn {
 
 .skill-modal::-webkit-scrollbar {
     width: 6px;
+}
+
+.rag-manager-content {
+    overflow-x: auto;
+}
+
+.rag-manager-empty {
+    border: 1px dashed #3f3f46;
+    border-radius: 6px;
+    color: #a8a8b3;
+    font-size: 0.9rem;
+    padding: 18px;
+    text-align: center;
+}
+
+.rag-manager-table {
+    border-collapse: collapse;
+    min-width: 620px;
+    width: 100%;
+}
+
+.rag-manager-table th,
+.rag-manager-table td {
+    border-bottom: 1px solid #29292e;
+    color: #c4c4cc;
+    font-size: 0.84rem;
+    padding: 10px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.rag-manager-table th {
+    color: #a8a8b3;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.rag-manager-table td:first-child {
+    color: #e1e1e6;
+    font-weight: 650;
+    max-width: 260px;
+    overflow-wrap: anywhere;
+}
+
+.rag-manager-table th:nth-child(2),
+.rag-manager-table td:nth-child(2),
+.rag-manager-table th:nth-child(4),
+.rag-manager-table td:nth-child(4),
+.rag-manager-table th:last-child,
+.rag-manager-table td:last-child {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.rag-manager-delete-btn {
+    align-items: center;
+    background: transparent;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #a8a8b3;
+    cursor: pointer;
+    display: inline-flex;
+    height: 28px;
+    justify-content: center;
+    width: 28px;
+}
+
+.rag-manager-delete-btn:hover,
+.rag-manager-delete-btn:focus {
+    background-color: rgba(247, 90, 104, 0.1);
+    border-color: #f75a68;
+    color: #f75a68;
+    outline: none;
+}
+
+.rag-manager-delete-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
 }
 
 .skill-modal::-webkit-scrollbar-track {
@@ -2421,6 +2721,12 @@ a.config-btn {
         text-align: center;
     }
 
+    .documentation-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        width: 100%;
+    }
+
     .documentation-layout {
         display: block;
     }
@@ -2432,5 +2738,29 @@ a.config-btn {
 
     .documentation-content {
         padding: 16px;
+    }
+
+    .product-documentation {
+        padding: 0;
+    }
+
+    .product-documentation > * {
+        margin-left: 16px;
+        margin-right: 16px;
+    }
+
+    .product-documentation > h1:first-child {
+        padding: 34px 16px 8px;
+    }
+
+    .product-documentation > h1:first-child + h2 {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .product-documentation > h1:first-child + h2 + p,
+    .product-documentation > h1:first-child + h2 + p + p {
+        padding-left: 16px;
+        padding-right: 16px;
     }
 }

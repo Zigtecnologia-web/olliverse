@@ -399,6 +399,8 @@ function iconSvg(name) {
         file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path>',
         'file-text': '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path>',
         'line-chart': '<path d="M3 3v18h18"></path><path d="m19 9-5 5-4-4-3 3"></path>',
+        'maximize-2': '<path d="M15 3h6v6"></path><path d="m21 3-7 7"></path><path d="m3 21 7-7"></path><path d="M9 21H3v-6"></path>',
+        'minimize-2': '<path d="m14 10 7-7"></path><path d="M20 10h-6V4"></path><path d="m3 21 7-7"></path><path d="M4 14h6v6"></path>',
         'pie-chart': '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951C12.449 1.996 12 2.448 12 3v8a1 1 0 0 0 1 1z"></path><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>',
         'refresh-cw': '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 16h5v5"></path>',
         'table-2': '<path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0-12h12M9 21h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"></path>',
@@ -409,7 +411,7 @@ function iconSvg(name) {
 }
 
 function normalizeCodeMarkdown(text) {
-    let normalizedText = repairMalformedCodeFences(text)
+    let normalizedText = fenceBareJsonBlocks(repairMalformedCodeFences(text))
         .replace(/```markdown\s*```(\w+)\s*([\s\S]*?)```\s*```/g, '```$1\n$2\n```')
         .replace(/```markdown\s+```(\w+)\s+([\s\S]*?)```\s*```/g, '```$1\n$2\n```')
         .replace(/```(\w+)\s+([\s\S]*?)```/g, (match, language, code) => {
@@ -424,6 +426,106 @@ function normalizeCodeMarkdown(text) {
     normalizedText = removeRepeatedCodeBlocks(normalizedText);
 
     return removePlainCodeBeforeFormattedCode(normalizedText);
+}
+
+function fenceBareJsonBlocks(text) {
+    const lines = text.split('\n');
+    const result = [];
+    let index = 0;
+    let isInsideFence = false;
+
+    while (index < lines.length) {
+        const line = lines[index];
+
+        if (line.trim().startsWith('```')) {
+            isInsideFence = !isInsideFence;
+            result.push(line);
+            index += 1;
+            continue;
+        }
+
+        const labelMatch = line.trim().match(/^(?:\*\*)?\s*(json-chart|json)\s*(?:\*\*)?:?\s*$/i);
+
+        if (!isInsideFence && labelMatch) {
+            let nextIndex = index + 1;
+
+            while (nextIndex < lines.length && lines[nextIndex].trim() === '') {
+                nextIndex += 1;
+            }
+
+            if (lines[nextIndex]?.trim().startsWith('{')) {
+                const collected = collectBalancedJsonLines(lines, nextIndex);
+
+                if (collected) {
+                    result.push(`\`\`\`${normalizeLanguageName(labelMatch[1])}`);
+                    result.push(collected.lines.join('\n'));
+                    result.push('```');
+                    index = collected.nextIndex;
+                    continue;
+                }
+            }
+        }
+
+        result.push(line);
+        index += 1;
+    }
+
+    return result.join('\n');
+}
+
+function collectBalancedJsonLines(lines, startIndex) {
+    const collected = [];
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let hasStarted = false;
+
+    for (let lineIndex = startIndex; lineIndex < lines.length; lineIndex += 1) {
+        const line = lines[lineIndex];
+
+        collected.push(line);
+
+        for (let charIndex = 0; charIndex < line.length; charIndex += 1) {
+            const char = line[charIndex];
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                escaped = inString;
+                continue;
+            }
+
+            if (char === '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (char === '{') {
+                depth += 1;
+                hasStarted = true;
+            }
+
+            if (char === '}') {
+                depth -= 1;
+            }
+        }
+
+        if (hasStarted && depth === 0) {
+            return {
+                lines: collected,
+                nextIndex: lineIndex + 1,
+            };
+        }
+    }
+
+    return null;
 }
 
 function repairMalformedCodeFences(text) {

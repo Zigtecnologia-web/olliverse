@@ -6,7 +6,7 @@
     "icon": "📊",
     "dependencies": {
         "js": [
-            "https://cdn.jsdelivr.net/npm/chart.js"
+            "public/vendor/chart.js/chart.umd.js"
         ]
     }
 }

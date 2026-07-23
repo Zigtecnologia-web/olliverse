@@ -63,12 +63,16 @@ final readonly class SqliteDocumentChunkRepository
     }
 
     /**
-     * @return array<int, array{id: int, source_name: string, chunks: int, created_at: string}>
+     * @return array<int, array{id: int, source_name: string, chunks: int, created_at: string, estimated_bytes: int}>
      */
     public function sources(): array
     {
         $statement = $this->pdo->query(
-            'SELECT rag_documents.id, rag_documents.source_name, COUNT(document_chunks.id) AS chunks, rag_documents.created_at
+            'SELECT rag_documents.id,
+                    rag_documents.source_name,
+                    COUNT(document_chunks.id) AS chunks,
+                    rag_documents.created_at,
+                    COALESCE(SUM(LENGTH(document_chunks.content) + LENGTH(document_chunks.embedding_json)), 0) AS estimated_bytes
              FROM rag_documents
              LEFT JOIN document_chunks ON document_chunks.document_id = rag_documents.id
              GROUP BY rag_documents.id, rag_documents.source_name, rag_documents.created_at
@@ -81,6 +85,7 @@ final readonly class SqliteDocumentChunkRepository
                 'source_name' => (string) $source['source_name'],
                 'chunks' => (int) $source['chunks'],
                 'created_at' => (string) $source['created_at'],
+                'estimated_bytes' => (int) $source['estimated_bytes'],
             ],
             $statement->fetchAll()
         );

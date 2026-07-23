@@ -56,10 +56,13 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 - HTML renderizado por PHP em `views/chat.php`.
 - JavaScript vanilla modularizado em arquivos separados.
 - CSS proprio em `public/assets/css/app.css`.
-- Bibliotecas via CDN:
+- Bibliotecas de frontend vendorizadas em `public/vendor/`:
   - `marked` para Markdown;
   - `DOMPurify` para sanitizacao de HTML;
-  - `highlight.js` para destaque de codigo.
+  - `highlight.js` para destaque de codigo;
+  - `xlsx` para leitura de planilhas;
+  - `Chart.js` para graficos do plugin analitico;
+  - bundle local do `@mlc-ai/web-llm` para carregar o provedor Web AI.
 
 ### Banco de dados
 
@@ -75,7 +78,7 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 - Endpoint de geracao rapida de texto usado: `/api/generate`.
 - Endpoint de listagem de modelos: `/api/tags`.
 - Comando local usado para metadados: `ollama show --verbose`.
-- Web AI experimental no navegador via WebGPU/WebLLM carregado sob demanda.
+- Web AI experimental no navegador via WebGPU/WebLLM carregado sob demanda a partir do bundle local.
 
 ## 4. Estrutura de pastas
 
@@ -206,7 +209,9 @@ Como os modelos Web AI rodam em uma janela menor que muitos modelos do Ollama, o
 
 Durante o primeiro uso, o navegador pode baixar arquivos grandes do modelo. A interface mostra um status proprio da Web AI com mensagens legiveis, como preparo ou download em andamento, e bloqueia temporariamente o campo de mensagem ate o modelo ficar pronto ou falhar.
 
-Esse modo depende de WebGPU habilitado no navegador e de acesso ao CDN usado pelo driver client-side. Se o navegador nao oferecer WebGPU, a interface mostra a falha e o Ollama segue disponivel como provedor principal.
+Esse modo depende de WebGPU habilitado no navegador. Se o navegador nao oferecer WebGPU, a interface mostra a falha e o Ollama segue disponivel como provedor principal.
+
+O import do driver WebLLM fica local em `public/vendor/web-llm/web-llm.js`. Os pesos dos modelos WebLLM continuam sendo baixados pelo proprio WebLLM quando o provedor Web AI e usado; eles nao fazem parte dos assets leves da interface.
 
 ### 8.2 Streaming de respostas
 
@@ -546,7 +551,7 @@ Caracteristicas:
 
 RAG significa usar documentos locais como contexto adicional para a resposta da IA.
 
-Na interface, isso aparece como um menu compacto de documentos ativos. O contador no topo do chat indica quantos arquivos estao marcados, por exemplo `2 documentos ativos`, e tambem abre o menu de selecao.
+Na interface, isso aparece como um menu compacto de documentos ativos. O contador no topo do chat indica quantos arquivos estao marcados, por exemplo `2 documentos ativos`, e tambem abre o menu de selecao. Ao lado do botao de adicionar arquivo, o botao de gerenciamento abre o painel de documentos adicionados.
 
 Quando nenhum documento esta marcado:
 
@@ -571,6 +576,14 @@ Na lista de documentos:
 3. desmarcar todos os documentos desativa o RAG para a conversa;
 4. o botao `x` abre um modal de confirmacao antes de remover o documento preparado e seus chunks;
 5. remover um documento impede que ele seja usado em respostas futuras.
+
+No painel de gerenciamento de documentos adicionados:
+
+1. `GET ?action=rag_documents_list` retorna os documentos preparados;
+2. cada item mostra nome, quantidade de chunks, data de preparo e estimativa de espaco ocupado;
+3. o estado vazio informa quando ainda nao ha documentos preparados;
+4. `POST ?action=rag_document_delete` recebe `document_id` e remove o registro em `rag_documents` junto com os chunks em `document_chunks`;
+5. depois da exclusao, a lista do painel e o contador de documentos ativos no chat sao atualizados sem recarregar a conversa.
 
 No motor **Ollama**, esse contexto e montado dentro do fluxo de streaming do backend. No motor **Web AI**, o navegador consulta `POST ?action=rag_context` antes de gerar a resposta e injeta o contexto recuperado no prompt enviado ao modelo WebGPU.
 
@@ -680,7 +693,7 @@ Quando o plugin esta ligado:
 1. o estado fica guardado em `$_SESSION['olliverse_plugins']`;
 2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
 3. o frontend tambem recebe esses prompts em `activePluginPrompts` para orientar respostas da Web AI;
-4. o frontend carrega Chart.js e os assets do plugin sob demanda;
+4. o frontend carrega Chart.js local em `public/vendor/chart.js/chart.umd.js` e os assets do plugin sob demanda;
 5. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
 5. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
 6. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
@@ -736,6 +749,25 @@ Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o paylo
 A alternancia acontece apenas no JavaScript do navegador. Ela destroi a instancia Chart.js atual, recria o grafico escolhido quando necessario e nao dispara novas requisicoes para o Ollama. No modo tabela, o botao de download fica desabilitado porque nao ha canvas ativo para exportar como PNG.
 
 O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, incluindo remover comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
+
+Antes de entregar os dados ao Chart.js, o plugin converte valores em formato numerico comum ou brasileiro, como `8,5`, `1.234,56`, `12%` e `R$ 100`, para numeros JavaScript reais. Se algum valor nao puder ser convertido, o bloco mostra erro em vez de montar um canvas vazio.
+
+O frontend tambem recupera alguns formatos imperfeitos comuns gerados pela IA, como blocos JSON soltos depois de um rotulo `json`, chaves com espacos (`" dados"`) e residuos visuais do highlighter (`class="code-number">`). Quando recebe uma lista de objetos com uma coluna de nome/grupo e varias metricas numericas, o plugin monta um grafico comparativo com datasets por grupo.
+
+### 8.24 Modo Foco
+
+A interface possui um **Modo Foco** para leitura de respostas longas, blocos de codigo, tabelas e graficos.
+
+O botao com icone de expansao fica no topo do chat. Ao ativar esse modo:
+
+- a barra lateral de historico fica oculta;
+- o header principal e reduzido para uma faixa minima;
+- a area de mensagens ocupa toda a largura e altura da viewport;
+- o botao muda para o icone de recolher e permite voltar ao layout normal.
+
+O estado e guardado em `sessionStorage` com a chave `olliverse_zen_mode_active`, portanto permanece apenas durante a sessao atual do navegador.
+
+Pressionar `Escape` quando o Modo Foco esta ativo restaura imediatamente o layout padrao.
 
 ## 9. Contratos HTTP atuais
 
@@ -952,7 +984,42 @@ Resposta esperada:
 
 O estado e salvo na sessao PHP e passa a valer para as proximas mensagens enviadas ao modelo.
 
-### 9.16 Inspecionar dados para sugestoes analiticas
+### 9.16 Gerenciar documentos adicionados
+
+```http
+GET /index.php?action=rag_documents_list
+Accept: application/json
+```
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "documents": [
+    {
+      "id": 1,
+      "source_name": "alunos.csv",
+      "chunks": 8,
+      "created_at": "2026-07-22 10:30:00",
+      "estimated_bytes": 12400
+    }
+  ]
+}
+```
+
+Para excluir um documento preparado:
+
+```http
+POST /index.php?action=rag_document_delete
+Content-Type: application/x-www-form-urlencoded
+
+document_id=1
+```
+
+O backend remove o documento de `rag_documents` e todos os chunks vinculados em `document_chunks`. Os endpoints antigos `action=rag_documents` e `action=rag_delete` continuam funcionando como aliases internos.
+
+### 9.17 Inspecionar dados para sugestoes analiticas
 
 ```http
 POST /index.php?action=data_insights
@@ -1044,7 +1111,53 @@ CREATE TABLE IF NOT EXISTS messages (
 
 Observacao importante: apesar da tabela aceitar `system`, o repositorio atualmente persiste apenas mensagens `user` e `assistant`. O system prompt fica no chat/persona e e reinjetado ao montar o contexto.
 
-### 10.4 Indices
+### 10.4 Tabela `rag_documents`
+
+```sql
+CREATE TABLE IF NOT EXISTS rag_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+)
+```
+
+Finalidade:
+
+- representar cada arquivo preparado para RAG;
+- manter um identificador estavel para selecao e exclusao;
+- permitir que arquivos antigos agrupados apenas por `source_name` sejam migrados para um documento formal.
+
+### 10.5 Tabela `document_chunks`
+
+```sql
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NULL,
+    source_name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding_json TEXT NOT NULL,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+)
+```
+
+Finalidade:
+
+- guardar os pedacos de texto extraidos dos documentos;
+- guardar o embedding JSON retornado pelo Ollama;
+- vincular cada chunk a `rag_documents.id`;
+- sustentar a busca por similaridade usada no chat e no plugin analitico.
+
+### 10.6 Busca textual de mensagens
+
+```sql
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+USING fts5(content, chat_id UNINDEXED)
+```
+
+A tabela virtual `messages_fts` e mantida por triggers de insert, update e delete em `messages`. Ela alimenta a busca no historico sem alterar o fluxo principal de conversas.
+
+### 10.7 Indices
 
 Indices criados:
 
@@ -1052,6 +1165,8 @@ Indices criados:
 CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id ON messages(chat_id, id);
 CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at);
 CREATE INDEX IF NOT EXISTS idx_chats_persona_id ON chats(persona_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_source_name ON document_chunks(source_name);
 ```
 
 ## 11. Principais classes e responsabilidades
@@ -1093,6 +1208,17 @@ Responsavel por:
 - excluir persona;
 - manter cache de persona ativa por sessao.
 
+### `App\Repositories\SqliteDocumentChunkRepository`
+
+Responsavel por:
+
+- criar ou reaproveitar registros em `rag_documents`;
+- substituir os chunks de um documento preparado;
+- listar documentos com `id`, nome, quantidade de chunks, data e tamanho estimado;
+- excluir um documento e seus chunks em uma transacao;
+- recuperar chunks mais parecidos com uma pergunta usando similaridade vetorial;
+- fornecer amostras de chunks para o plugin analitico.
+
 ### `App\Services\OllamaClient`
 
 Responsavel por:
@@ -1115,6 +1241,37 @@ Faz:
 - chamar `OllamaClient::generate()`;
 - extrair YAML puro da resposta, incluindo respostas envolvidas em code fence;
 - validar as chaves obrigatorias `name`, `role`, `persona_traits`, `skills` e `directives`.
+
+### `App\Services\RagIngestionService`
+
+Responsavel por preparar documentos locais para consulta.
+
+Faz:
+
+- receber nome e conteudo textual;
+- quebrar o texto com `RagChunkerService`;
+- gerar embeddings no Ollama usando `RAG_EMBEDDING_MODEL`;
+- salvar os chunks via `SqliteDocumentChunkRepository`;
+- devolver metadados do documento preparado.
+
+### `App\Services\RagRetrievalService`
+
+Responsavel por buscar contexto em documentos ja preparados.
+
+Faz:
+
+- transformar a pergunta em embedding;
+- buscar chunks semelhantes no SQLite;
+- montar o trecho adicional do system prompt;
+- devolver metadados de fontes exibidos abaixo da resposta.
+
+### `App\Services\RagChunkerService`
+
+Divide textos longos em chunks menores, com tamanho maximo controlado e pequeno overlap para preservar continuidade entre pedacos.
+
+### `App\Services\VectorSimilarityService`
+
+Calcula similaridade de cosseno entre embeddings.
 
 ### `App\Services\PdfExportService`
 
@@ -1486,6 +1643,7 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Possui layout responsivo basico.
 - [x] Indexa documentos de texto para RAG local.
 - [x] Usa documentos indexados como contexto opcional no chat.
+- [x] Gerencia documentos adicionados com metadados e exclusao em cascata.
 - [x] Exibe a Central de Documentacao pelo menu principal.
 - [x] Ativa/desativa plugins por sessao.
 - [x] Renderiza graficos via plugin `data_analyst` a partir de blocos `json-chart`.

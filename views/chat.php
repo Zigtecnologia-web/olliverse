@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Olliverse</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js/styles/github-dark.min.css">
+    <link rel="stylesheet" href="public/vendor/highlight.js/styles/github-dark.min.css">
     <link rel="stylesheet" href="public/assets/css/app.css">
     <?php foreach ($activePlugins as $plugin): ?>
         <?php $pluginStyle = $plugin['assets']['style'] ?? null; ?>
@@ -75,6 +75,7 @@
             <div class="header-title">
                 <h1>Olliverse</h1>
             </div>
+            <button type="button" id="zenModeBtn" class="config-btn zen-mode-btn" aria-label="Ativar modo foco" title="Ativar modo foco" data-tooltip="Ativar modo foco" aria-pressed="false"><?php echo iconSvg('maximize-2'); ?></button>
             <div class="model-controls">
                 <div class="provider-field">
                     <label for="providerSelect">Motor</label>
@@ -121,6 +122,7 @@
             <form id="ragUploadForm" class="rag-upload-form" enctype="multipart/form-data">
                 <input type="file" id="ragFileInput" name="document" class="rag-file-input" accept=".txt,.md,.php,.js,.css,.html,.json,.sql,.csv,.xlsx,.xls,text/*">
                 <button type="button" id="ragPickFileBtn" class="secondary-config-btn rag-add-document-btn" aria-label="Adicionar documento" title="Adicionar documento" data-tooltip="Adicionar documento"><?php echo iconSvg('file-plus'); ?></button>
+                <button type="button" id="ragManagerBtn" class="secondary-config-btn rag-manager-btn" aria-label="Gerenciar documentos" title="Gerenciar documentos" data-tooltip="Gerenciar documentos"><?php echo iconSvg('database'); ?></button>
                 <span id="ragStatus" class="rag-status" aria-live="polite"></span>
             </form>
             <div id="ragDocumentList" class="rag-document-list" aria-live="polite"></div>
@@ -218,6 +220,19 @@
     </div>
 </div>
 
+<div class="modal-backdrop" id="ragManagerModal" aria-hidden="true">
+    <div class="rag-manager-modal" role="dialog" aria-modal="true" aria-labelledby="ragManagerModalTitle">
+        <div class="modal-header">
+            <h2 id="ragManagerModalTitle">Documentos adicionados</h2>
+            <button type="button" id="closeRagManagerModalBtn" class="modal-close-btn" aria-label="Fechar gerenciador de documentos"><?php echo iconSvg('x'); ?></button>
+        </div>
+        <div class="modal-body">
+            <div id="ragManagerStatus" class="skill-status" aria-live="polite"></div>
+            <div id="ragManagerContent" class="rag-manager-content"></div>
+        </div>
+    </div>
+</div>
+
 <div class="modal-backdrop" id="deleteRagDocumentModal" aria-hidden="true">
     <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteRagDocumentModalTitle">
         <div class="modal-header">
@@ -280,10 +295,10 @@
 
 <div id="personaToast" class="persona-toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/highlight.js/highlight.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="public/vendor/dompurify/purify.min.js"></script>
+<script src="public/vendor/marked/marked.min.js"></script>
+<script src="public/vendor/highlight.js/highlight.min.js"></script>
+<script src="public/vendor/xlsx/xlsx.full.min.js"></script>
 <?php foreach ($activePlugins as $plugin): ?>
     <?php foreach (($plugin['dependencies']['js'] ?? []) as $dependencySrc): ?>
         <script src="<?php echo htmlspecialchars((string) $dependencySrc, ENT_QUOTES, 'UTF-8'); ?>" data-plugin-asset="<?php echo htmlspecialchars((string) $plugin['slug'], ENT_QUOTES, 'UTF-8'); ?>"></script>
@@ -331,6 +346,7 @@
 	<script src="public/assets/js/history-panel.js"></script>
 	<script src="public/assets/js/rag-panel.js"></script>
 	<script src="public/assets/js/plugin-panel.js"></script>
+	<script src="public/assets/js/zen-mode.js"></script>
 	<script src="public/assets/js/app.js"></script>
 
 </body>

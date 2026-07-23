@@ -7,6 +7,7 @@
         activate() {
             ensureInsightsPanel();
             maybeScheduleInsightsInspection();
+            scheduleChartReprocess();
         },
 
         deactivate() {
@@ -15,7 +16,12 @@
         },
 
         processMessage(messageElement) {
-            if (!messageElement || !window.Chart) {
+            if (!messageElement) {
+                return;
+            }
+
+            if (!window.Chart) {
+                scheduleChartReprocess();
                 return;
             }
 
@@ -60,6 +66,37 @@
             maybeScheduleInsightsInspection();
         }
     });
+    window.addEventListener('load', scheduleChartReprocess);
+
+    function scheduleChartReprocess() {
+        if (window.OlliversePlugins.data_analyst.reprocessTimer) {
+            return;
+        }
+
+        window.OlliversePlugins.data_analyst.reprocessAttempts = window.OlliversePlugins.data_analyst.reprocessAttempts || 0;
+
+        if (window.OlliversePlugins.data_analyst.reprocessAttempts >= 12) {
+            return;
+        }
+
+        window.OlliversePlugins.data_analyst.reprocessTimer = window.setTimeout(() => {
+            window.OlliversePlugins.data_analyst.reprocessTimer = null;
+            window.OlliversePlugins.data_analyst.reprocessAttempts += 1;
+
+            if (!window.Chart) {
+                scheduleChartReprocess();
+                return;
+            }
+
+            processRenderedAssistantMessages();
+        }, 250);
+    }
+
+    function processRenderedAssistantMessages() {
+        document.querySelectorAll('.message.assistant').forEach((message) => {
+            window.OlliversePlugins.data_analyst.processMessage(message);
+        });
+    }
 
     function ensureInsightsPanel() {
         const chatMessages = document.getElementById('chatMessages');
@@ -315,6 +352,7 @@
 
         try {
             payload = normalizePayload(parseChartJson(rawJson), 0);
+            payload = normalizeChartValues(payload);
             validatePayload(payload);
         } catch (error) {
             if (strict && rawJson.trim().startsWith('{')) {
@@ -357,27 +395,46 @@
         }
 
         try {
-            const payload = normalizePayload(parseChartJson(json), 0);
+            const payload = normalizeChartValues(normalizePayload(parseChartJson(json), 0));
 
-            return isNormalizedPayload(payload)
-                && (hasChartKey(rawJson, 'type') || hasChartKey(rawJson, 'labels') || hasChartKey(rawJson, 'data'));
+            return isNormalizedPayload(payload) && hasAnyChartKey(rawJson);
         } catch (error) {
             return false;
         }
     }
 
+    function hasAnyChartKey(rawJson) {
+        return ['type', 'tipo', 'chartType', 'labels', 'rotulos', 'rótulos', 'data', 'dados', 'valores', 'datasets', 'series']
+            .some((key) => hasChartKey(rawJson, key));
+    }
+
     function hasChartKey(rawJson, key) {
-        return new RegExp(`["']${key}["']\\s*:`, 'i').test(rawJson);
+        return new RegExp(`["']\\s*${escapeRegExp(key)}\\s*["']\\s*:`, 'i').test(rawJson);
+    }
+
+    function escapeRegExp(value) {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     function parseChartJson(rawJson) {
-        const json = extractJsonObject(rawJson) || '{}';
+        const json = repairHighlightedJson(extractJsonObject(rawJson)) || '{}';
 
         try {
             return JSON.parse(json);
         } catch (error) {
             return JSON.parse(stripJsonComments(json));
         }
+    }
+
+    function repairHighlightedJson(json) {
+        return String(json || '')
+            .replace(/(?:<span\s+)?class=(?:"|')?code-number(?:"|')?>/g, '')
+            .replace(/<\/span>/g, '')
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'")
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
     }
 
     function stripJsonComments(json) {
@@ -514,20 +571,34 @@
             return;
         }
 
+        if (!window.Chart) {
+            wrapper.replaceWith(createChartError('Chart.js nao foi carregado.'));
+            return;
+        }
+
         setChartLoading(wrapper, true);
         canvas.hidden = false;
         canvas.classList.add('chart-canvas-hidden');
         tableContainer.hidden = true;
         tableContainer.innerHTML = '';
+
+        let revealTimer = null;
+        const revealCanvas = () => {
+            window.clearTimeout(revealTimer);
+            canvas.classList.remove('chart-canvas-hidden');
+            setChartLoading(wrapper, false);
+        };
+
         try {
             wrapper._olliverseChartInstance = new Chart(canvas.getContext('2d'), chartOptions({
                 ...payload,
                 type: selectedType,
             }, () => {
-                canvas.classList.remove('chart-canvas-hidden');
-                setChartLoading(wrapper, false);
+                revealCanvas();
             }));
+            revealTimer = window.setTimeout(revealCanvas, 700);
         } catch (error) {
+            window.clearTimeout(revealTimer);
             setChartLoading(wrapper, false);
             canvas.replaceWith(createChartError(error.message || 'Nao foi possivel renderizar o grafico.'));
             return;
@@ -586,6 +657,72 @@
         if (payload.labels.length === 0 || payload.labels.length !== payload.data.length) {
             throw new Error('Labels e valores precisam ter o mesmo tamanho.');
         }
+
+        if (!payload.data.every((value) => Number.isFinite(value))) {
+            throw new Error('Os valores do gráfico precisam ser numéricos.');
+        }
+    }
+
+    function normalizeChartValues(payload) {
+        if (!isNormalizedPayload(payload)) {
+            return payload;
+        }
+
+        return {
+            ...payload,
+            labels: payload.labels.map((label) => String(label ?? '').trim()),
+            data: payload.data.map(parseChartNumber),
+            datasets: normalizeChartDatasets(payload.datasets),
+        };
+    }
+
+    function normalizeChartDatasets(datasets) {
+        if (!Array.isArray(datasets)) {
+            return undefined;
+        }
+
+        return datasets.map((dataset, index) => {
+            return {
+                label: String(dataset?.label || `Serie ${index + 1}`),
+                data: Array.isArray(dataset?.data) ? dataset.data.map(parseChartNumber) : [],
+            };
+        }).filter((dataset) => {
+            return dataset.data.length > 0 && dataset.data.every((value) => Number.isFinite(value));
+        });
+    }
+
+    function parseChartNumber(value) {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? value : NaN;
+        }
+
+        let text = String(value ?? '').trim();
+
+        if (text === '') {
+            return NaN;
+        }
+
+        text = text
+            .replace(/\s+/g, '')
+            .replace(/[R$€£%]/g, '')
+            .replace(/[^\d,.\-]/g, '');
+
+        const commaIndex = text.lastIndexOf(',');
+        const dotIndex = text.lastIndexOf('.');
+
+        if (commaIndex > -1 && dotIndex > -1) {
+            text = commaIndex > dotIndex
+                ? text.replace(/\./g, '').replace(',', '.')
+                : text.replace(/,/g, '');
+        } else if (commaIndex > -1) {
+            text = text.replace(',', '.');
+        } else if (/^-?\d{1,3}(\.\d{3})+$/.test(text)) {
+            text = text.replace(/\./g, '');
+        }
+
+        const number = Number(text);
+
+        return Number.isFinite(number) ? number : NaN;
     }
 
     function normalizePayload(payload, depth = 0) {
@@ -609,6 +746,12 @@
         }
 
         if (Array.isArray(data) && data[0] && typeof data[0] === 'object') {
+            const tablePayload = normalizeObjectTable(data, type, title);
+
+            if (isNormalizedPayload(tablePayload)) {
+                return tablePayload;
+            }
+
             const dataPayload = normalizeSeries(data, type, title);
 
             if (isNormalizedPayload(dataPayload)) {
@@ -644,6 +787,12 @@
         }
 
         if (Array.isArray(series) && series[0]) {
+            const tablePayload = normalizeObjectTable(series, type, title);
+
+            if (isNormalizedPayload(tablePayload)) {
+                return tablePayload;
+            }
+
             const seriesPayload = normalizeSeries(series, type, title);
 
             if (isNormalizedPayload(seriesPayload)) {
@@ -691,6 +840,72 @@
         return payload;
     }
 
+    function normalizeObjectTable(rows, type, title) {
+        const labelKey = detectLabelKey(rows);
+
+        if (!labelKey) {
+            return null;
+        }
+
+        const metricKeys = Object.keys(rows[0] || {}).filter((key) => {
+            return normalizeKey(key) !== normalizeKey(labelKey)
+                && rows.some((row) => isChartNumberLike(row?.[key]));
+        });
+
+        if (metricKeys.length === 0) {
+            return null;
+        }
+
+        if (rows.length <= metricKeys.length) {
+            return {
+                type,
+                title,
+                labels: metricKeys.map(humanizeLabel),
+                data: metricKeys.map((key) => averageNumericValues(rows.map((row) => row?.[key]))),
+                datasets: rows.map((row, index) => {
+                    return {
+                        label: String(valueByAliases(row, ['label', 'labels', 'name', 'nome', 'grupo', 'group', 'categoria', 'category']) || `Serie ${index + 1}`),
+                        data: metricKeys.map((key) => parseChartNumber(row?.[key])),
+                    };
+                }),
+            };
+        }
+
+        return {
+            type,
+            title,
+            labels: rows.map((row) => valueByAliases(row, ['label', 'labels', 'name', 'nome', 'grupo', 'group', 'categoria', 'category'])),
+            data: rows.map((row) => averageNumericValues(metricKeys.map((key) => row?.[key]))),
+        };
+    }
+
+    function detectLabelKey(rows) {
+        const keys = Object.keys(rows[0] || {});
+        const aliases = ['label', 'labels', 'name', 'nome', 'grupo', 'group', 'categoria', 'category'];
+
+        return keys.find((key) => aliases.includes(normalizeKey(key))) || keys.find((key) => {
+            return rows.some((row) => typeof row?.[key] === 'string' && !isChartNumberLike(row[key]));
+        });
+    }
+
+    function averageNumericValues(values) {
+        const numbers = values.map(parseChartNumber).filter((value) => Number.isFinite(value));
+
+        if (numbers.length === 0) {
+            return NaN;
+        }
+
+        return Number((numbers.reduce((sum, value) => sum + value, 0) / numbers.length).toFixed(4));
+    }
+
+    function humanizeLabel(key) {
+        return String(key || '')
+            .trim()
+            .replace(/[_-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/^\w/, (letter) => letter.toUpperCase());
+    }
+
     function normalizeSeries(series, type, title) {
         const labels = series.map((item) => {
             return valueByAliases(item, ['label', 'labels', 'name', 'nome', 'genero', 'gênero', 'sexo', 'categoria', 'category']);
@@ -708,12 +923,23 @@
         }
 
         for (const alias of aliases) {
-            if (Object.prototype.hasOwnProperty.call(payload, alias)) {
-                return payload[alias];
+            const normalizedAlias = normalizeKey(alias);
+            const matchedKey = Object.keys(payload).find((key) => normalizeKey(key) === normalizedAlias);
+
+            if (matchedKey !== undefined) {
+                return payload[matchedKey];
             }
         }
 
         return undefined;
+    }
+
+    function normalizeKey(key) {
+        return String(key || '')
+            .trim()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
     }
 
     function isNormalizedPayload(payload) {
@@ -740,7 +966,11 @@
     }
 
     function isNumericValue(value) {
-        return value !== null && value !== '' && Number.isFinite(Number(value));
+        return isChartNumberLike(value);
+    }
+
+    function isChartNumberLike(value) {
+        return Number.isFinite(parseChartNumber(value));
     }
 
     function chartOptions(payload, onComplete = null) {
@@ -758,14 +988,7 @@
             type,
             data: {
                 labels: payload.labels,
-                datasets: [{
-                    label: payload.title || 'Métricas',
-                    data: payload.data.map(Number),
-                    backgroundColor: colors,
-                    borderColor: colors.map((color) => color.replace('0.75', '1')),
-                    borderWidth: 1,
-                    tension: 0.3,
-                }],
+                datasets: chartDatasets(payload, colors),
             },
             options: {
                 responsive: true,
@@ -803,6 +1026,32 @@
                 },
             },
         };
+    }
+
+    function chartDatasets(payload, colors) {
+        if (Array.isArray(payload.datasets) && payload.datasets.length > 0 && payload.type !== 'pie') {
+            return payload.datasets.map((dataset, index) => {
+                const color = colors[index % colors.length];
+
+                return {
+                    label: dataset.label || `Serie ${index + 1}`,
+                    data: Array.isArray(dataset.data) ? dataset.data : [],
+                    backgroundColor: color,
+                    borderColor: color.replace('0.75', '1'),
+                    borderWidth: 1,
+                    tension: 0.3,
+                };
+            });
+        }
+
+        return [{
+            label: payload.title || 'Métricas',
+            data: payload.data,
+            backgroundColor: colors,
+            borderColor: colors.map((color) => color.replace('0.75', '1')),
+            borderWidth: 1,
+            tension: 0.3,
+        }];
     }
 
     function tableHtml(payload) {
@@ -926,7 +1175,5 @@
         return normalizedTitle || 'grafico';
     }
 
-    document.querySelectorAll('.message.assistant').forEach((message) => {
-        window.OlliversePlugins.data_analyst.processMessage(message);
-    });
+    processRenderedAssistantMessages();
 })();

@@ -46,7 +46,9 @@ $pluginManager = $app['plugin_manager'];
 $pdo = $app['pdo'];
 
 if (($_GET['view'] ?? '') === 'docs') {
-    $documentationService = new DocumentationService(__DIR__ . '/Doc/README.md');
+    $documentationMode = ($_GET['doc'] ?? 'produto') === 'tecnico' ? 'tecnico' : 'produto';
+    $documentationSource = $documentationMode === 'tecnico' ? 'README.md' : 'Produto.md';
+    $documentationService = new DocumentationService(__DIR__ . '/Doc/' . $documentationSource);
     $documentationHtml = $documentationService->html();
     $returnChatId = (int) ($_GET['chat_id'] ?? 0);
 
@@ -215,7 +217,7 @@ if (($_GET['action'] ?? '') === 'model_metadata') {
     exit;
 }
 
-if (($_GET['action'] ?? '') === 'rag_documents') {
+if (in_array(($_GET['action'] ?? ''), ['rag_documents', 'rag_documents_list'], true)) {
     jsonResponse([
         'success' => true,
         'documents' => $documentChunkRepository->sources(),
@@ -243,7 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_in
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_delete') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array(($_GET['action'] ?? ''), ['rag_delete', 'rag_document_delete'], true)) {
     try {
         $deleted = $documentChunkRepository->deleteDocument((int) ($_POST['document_id'] ?? 0));
 
