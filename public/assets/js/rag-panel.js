@@ -36,7 +36,7 @@ function initRagPanel() {
     });
 
     document.addEventListener('click', function(event) {
-        if (!event.target.closest('.rag-documents-menu')) {
+        if (!event.target.closest('.rag-documents-menu') && !event.target.closest('.data-insights-popover')) {
             closeRagDocumentsMenu();
         }
     });
@@ -86,7 +86,7 @@ function getSelectedRagDocumentIds() {
 
 function setRagDocumentControlsDisabled(disabled) {
     document
-        .querySelectorAll('.rag-document-checkbox, .rag-delete-btn, .rag-manager-delete-btn, .rag-documents-menu-btn, #ragManagerBtn')
+        .querySelectorAll('.rag-document-checkbox, .rag-delete-btn, .rag-manager-delete-btn, .rag-documents-menu-btn, #ragManagerBtn, #dataInsightsQuickBtn, #dataInsightsDrawerBtn')
         .forEach((control) => {
             control.disabled = disabled;
         });
@@ -339,6 +339,11 @@ function renderRagDocuments(documents) {
     popover.setAttribute('role', 'menu');
     menuButton.addEventListener('click', function(event) {
         event.stopPropagation();
+        if (event.target.closest('.rag-pill-unlink')) {
+            unlinkSelectedRagDocument();
+            return;
+        }
+
         toggleRagDocumentsMenu(menu, menuButton);
     });
 
@@ -576,13 +581,49 @@ function closeRagDocumentsMenu() {
 function updateRagDocumentBadge() {
     const button = document.querySelector('.rag-documents-menu-btn');
     const documentCheckboxes = getDocumentCheckboxes();
-    const selectedCount = getSelectedDocumentCheckboxes().length;
+    const selectedCheckboxes = getSelectedDocumentCheckboxes();
+    const selectedCount = selectedCheckboxes.length;
     const label = `${selectedCount} ${selectedCount === 1 ? 'documento ativo' : 'documentos ativos'}`;
 
     if (button) {
-        button.textContent = label;
+        const selectedName = selectedCheckboxes[0]
+            ?.closest('.rag-document-chip')
+            ?.querySelector('.rag-document-name')
+            ?.textContent
+            ?.replace(/\s*\(\d+\)\s*$/, '')
+            || label;
+        const visibleLabel = selectedCount === 1 ? selectedName : label;
+
+        button.innerHTML = [
+            '<span class="rag-pill-file" aria-hidden="true"></span>',
+            `<span class="rag-pill-label">${escapeHtml(visibleLabel)}</span>`,
+            selectedCount > 0 ? '<span class="rag-pill-unlink" role="button" aria-label="Desvincular documento ativo">x</span>' : '',
+        ].join('');
         button.classList.toggle('empty', documentCheckboxes.length > 0 && selectedCount === 0);
+        button.title = label;
+        button.setAttribute('aria-label', label);
     }
+}
+
+function unlinkSelectedRagDocument() {
+    const checkbox = getSelectedDocumentCheckboxes()[0];
+
+    if (!checkbox) {
+        return;
+    }
+
+    checkbox.checked = false;
+    updateRagDocumentBadge();
+    document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }
 
 function setRagStatus(message, isError = false) {

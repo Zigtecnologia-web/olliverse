@@ -2,7 +2,7 @@
 
 - **Criado por:** Valdiney França
 - **Data de criacao:** 19 de julho de 2026
-- **Ultima atualizacao:** 22 de julho de 2026
+- **Ultima atualizacao:** 23 de julho de 2026
 
 ## 1. Visao geral
 
@@ -563,7 +563,7 @@ Caracteristicas:
 
 RAG significa usar documentos locais como contexto adicional para a resposta da IA.
 
-Na interface, isso aparece como um menu compacto de documentos ativos. O contador no topo do chat indica quantos arquivos estao marcados, por exemplo `2 documentos ativos`, e tambem abre o menu de selecao. Ao lado do botao de adicionar arquivo, o botao de gerenciamento abre o painel de documentos adicionados.
+Na interface, a selecao de documentos fica dentro da gaveta **Resumo** quando o plugin analitico esta ativo. Quando ha apenas um arquivo marcado, a pilula mostra o nome truncado do documento; quando ha varios, mostra a contagem, por exemplo `2 documentos ativos`. A propria pilula abre o menu de selecao e o `x` interno apenas desvincula rapidamente o primeiro documento ativo, sem apagar o arquivo preparado. Ao lado do botao de adicionar arquivo, o botao de gerenciamento abre o painel de documentos adicionados.
 
 Quando nenhum documento esta marcado:
 
@@ -586,8 +586,9 @@ Na lista de documentos:
 1. cada arquivo tem um checkbox proprio;
 2. marcar um documento inclui esse arquivo no contexto da proxima mensagem;
 3. desmarcar todos os documentos desativa o RAG para a conversa;
-4. o botao `x` abre um modal de confirmacao antes de remover o documento preparado e seus chunks;
-5. remover um documento impede que ele seja usado em respostas futuras.
+4. o `x` da pilula dentro de **Resumo** desvincula um documento ativo sem remover o preparo;
+5. o botao `x` de cada item da lista abre um modal de confirmacao antes de remover o documento preparado e seus chunks;
+6. remover um documento impede que ele seja usado em respostas futuras.
 
 No painel de gerenciamento de documentos adicionados:
 
@@ -710,21 +711,22 @@ Quando o plugin esta ligado:
 6. quando uma resposta do assistente contem uma tabela com categorias e valores numericos, o frontend exibe o botao **Plotar grafico** no rodape da mensagem;
 7. ao clicar em **Plotar grafico**, o plugin extrai os dados da tabela ja renderizada e cria um card Chart.js sem nova chamada ao Ollama;
 8. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
-9. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
+9. o controle compacto **Resumo** aparece quando ha documentos adicionados e abre a gaveta lateral sem chamar IA automaticamente; dentro dela ficam a selecao de documentos ativos e o botao **Gerar insights**, que analisa os documentos marcados e abre um popover de sugestoes rapidas;
 10. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
 11. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos de grafico por imagens estaticas.
 
 O fluxo de inspecao opcional usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
-Quando o plugin esta ativo, a opcao **Inspecionar documento** fica desligada por padrao e so aparece se existir pelo menos um documento ativo. Quando o usuario liga essa opcao:
+Quando o plugin esta ativo, o controle **Resumo** aparece se existir pelo menos um documento adicionado. A selecao de documentos ativos fica dentro dessa gaveta, nao solta no topo do chat. A inspecao nao ocupa mais uma faixa fixa acima da conversa e nao roda automaticamente no carregamento da tela. O resumo tecnico e as sugestoes so sao gerados quando o usuario aciona **Gerar insights** dentro dessa gaveta.
 
-1. o frontend chama `POST /index.php?action=data_insights`;
-2. o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
-3. a resposta do modelo precisa conter um JSON com `summary` e `suggestions`;
-4. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
-5. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
-6. o frontend renderiza um painel com resumo e chips de sugestoes acima da conversa;
-7. cada chip dispara uma pergunta normal do chat pedindo uma tabela Markdown com os documentos ativos.
+1. o usuario clica em **Gerar insights**;
+2. o frontend chama `POST /index.php?action=data_insights`;
+3. o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
+4. a resposta do modelo precisa conter um JSON com `summary` e `suggestions`;
+5. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
+6. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
+7. o frontend renderiza o resumo na gaveta lateral e replica os chips no popover de sugestoes;
+8. cada chip dispara uma pergunta normal do chat pedindo uma tabela Markdown com os documentos ativos.
 
 O prompt do plugin funciona como uma regra nativa de preparacao de dados para grafico. Antes de montar a tabela Markdown, o modelo deve inferir:
 
@@ -1107,7 +1109,7 @@ Resposta esperada:
 }
 ```
 
-O endpoint nao recebe upload novo. Ele usa apenas os IDs enviados em `rag_document_ids[]`, consultando os documentos ja preparados em `rag_documents` e `document_chunks`. Na interface, ele so e chamado quando o plugin de dados esta ativo e a opcao **Inspecionar documento** esta ligada.
+O endpoint nao recebe upload novo. Ele usa apenas os IDs enviados em `rag_document_ids[]`, consultando os documentos ja preparados em `rag_documents` e `document_chunks`. Na interface, ele so e chamado quando o plugin de dados esta ativo, ha documentos ativos e o usuario clica em **Gerar insights**.
 
 O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 

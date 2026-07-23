@@ -578,6 +578,7 @@ a.history-action-menu-item {
     flex-direction: column;
     overflow: hidden;
     border: 1px solid #29292e;
+    position: relative;
     transition: border-radius 0.24s ease, border-color 0.24s ease, box-shadow 0.24s ease;
 }
 
@@ -1077,7 +1078,8 @@ a.history-action-menu-item {
     align-items: center;
     display: flex;
     flex: 1;
-    gap: 12px;
+    gap: 8px;
+    justify-content: flex-end;
     min-width: 0;
 }
 
@@ -1146,13 +1148,14 @@ a.history-action-menu-item {
 .rag-document-list {
     flex: 0 0 auto;
     min-width: 0;
+    order: 2;
     position: relative;
 }
 
 .rag-document-empty,
 .rag-documents-menu-btn {
-    border: 1px solid #323238;
-    border-radius: 6px;
+    border: 1px solid rgba(63, 63, 70, 0.58);
+    border-radius: 999px;
     color: #a8a8b3;
     font-size: 0.75rem;
     line-height: 1.2;
@@ -1168,19 +1171,51 @@ a.history-action-menu-item {
 
 .rag-documents-menu-btn {
     align-items: center;
-    background-color: #25252b;
+    background-color: rgba(37, 37, 43, 0.72);
     cursor: pointer;
     display: inline-flex;
-    gap: 8px;
-    max-width: 190px;
+    gap: 6px;
+    max-width: 250px;
 }
 
-.rag-documents-menu-btn::after {
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid currentColor;
+.rag-pill-file::before {
     content: '';
+    border: 1px solid currentColor;
+    border-radius: 2px;
     flex: 0 0 auto;
+    height: 12px;
+    opacity: 0.72;
+    width: 10px;
+}
+
+.rag-pill-file,
+.rag-pill-label,
+.rag-pill-unlink {
+    align-items: center;
+    display: inline-flex;
+}
+
+.rag-pill-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rag-pill-unlink {
+    border-radius: 50%;
+    color: #7c7c8a;
+    flex: 0 0 16px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    height: 16px;
+    justify-content: center;
+    width: 16px;
+}
+
+.rag-pill-unlink:hover,
+.rag-pill-unlink:focus {
+    background-color: rgba(247, 90, 104, 0.12);
+    color: #f75a68;
 }
 
 .rag-documents-menu-btn:hover,
@@ -1199,10 +1234,11 @@ a.history-action-menu-item {
 }
 
 .rag-documents-popover {
-    background-color: #202027;
-    border: 1px solid #323238;
+    backdrop-filter: blur(14px);
+    background-color: rgba(32, 32, 39, 0.94);
+    border: 1px solid rgba(63, 63, 70, 0.72);
     border-radius: 6px;
-    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
+    box-shadow: 0 18px 38px rgba(0, 0, 0, 0.42);
     display: none;
     max-height: 280px;
     min-width: 280px;
@@ -1211,7 +1247,7 @@ a.history-action-menu-item {
     position: absolute;
     right: 0;
     top: calc(100% + 8px);
-    z-index: 85;
+    z-index: 95;
 }
 
 .rag-documents-menu.open .rag-documents-popover {
@@ -1286,8 +1322,9 @@ a.history-action-menu-item {
     align-items: center;
     display: flex;
     gap: 8px;
-    flex: 0 1 320px;
+    flex: 0 1 auto;
     min-width: 0;
+    order: 1;
 }
 
 .rag-file-input {
@@ -1314,7 +1351,7 @@ a.history-action-menu-item {
 
 .rag-status {
     color: #04d361;
-    flex: 1;
+    flex: 0 1 220px;
     font-size: 0.78rem;
     min-height: 1rem;
     min-width: 0;

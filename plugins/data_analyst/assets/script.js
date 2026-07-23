@@ -1,18 +1,18 @@
 (function() {
-    const INSPECT_STORAGE_KEY = 'olliverse:data_analyst:inspect_rag_document';
-
     window.OlliversePlugins = window.OlliversePlugins || {};
 
     window.OlliversePlugins.data_analyst = {
         activate() {
             ensureInsightsPanel();
-            maybeScheduleInsightsInspection();
             scheduleChartReprocess();
         },
 
         deactivate() {
             window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
+            restoreRagDocumentsHome();
             document.getElementById('dataInsightsPanel')?.remove();
+            document.getElementById('dataInsightsQuickBtn')?.remove();
+            document.getElementById('dataInsightsDrawerBtn')?.remove();
             removeTablePlotActions();
         },
 
@@ -51,26 +51,19 @@
     };
 
     ensureInsightsPanel();
-    maybeScheduleInsightsInspection();
     document.addEventListener('change', (event) => {
         if (!isDataAnalystActive()) {
             return;
         }
 
-        if (event.target?.matches?.('#dataInsightsToggle')) {
-            setInsightsInspectionEnabled(event.target.checked);
-            return;
-        }
-
         if (event.target?.matches?.('.rag-document-checkbox')) {
             updateInsightsPanelVisibility();
-            maybeScheduleInsightsInspection();
         }
     });
     document.addEventListener('olliverse:rag-documents-rendered', () => {
         if (isDataAnalystActive()) {
+            moveRagDocumentsIntoDrawer();
             updateInsightsPanelVisibility();
-            maybeScheduleInsightsInspection();
         }
     });
     window.addEventListener('load', scheduleChartReprocess);
@@ -106,43 +99,122 @@
     }
 
     function ensureInsightsPanel() {
-        const chatMessages = document.getElementById('chatMessages');
+        const chatContainer = document.querySelector('.chat-container');
 
-        if (!chatMessages || document.getElementById('dataInsightsPanel')) {
+        ensureInsightsControls();
+
+        if (!chatContainer || document.getElementById('dataInsightsPanel')) {
             return;
         }
 
         const panel = document.createElement('div');
         panel.id = 'dataInsightsPanel';
-        panel.className = 'data-insights-edge-panel';
+        panel.className = 'data-insights-drawer';
+        panel.setAttribute('aria-hidden', 'true');
         panel.innerHTML = [
-            '<div class="data-insights-toolbar">',
-            '<label class="data-insights-toggle" for="dataInsightsToggle">',
-            '<input type="checkbox" id="dataInsightsToggle">',
-            '<span class="data-insights-toggle-track" aria-hidden="true"></span>',
-            '<span class="data-insights-toggle-label">Inspecionar documento</span>',
-            '</label>',
+            '<div class="data-insights-drawer-header">',
+            '<div>',
+            '<strong>Analise do documento</strong>',
             '<div id="dataInsightsStatus" class="data-insights-status" aria-live="polite"></div>',
             '</div>',
+            '<div class="data-insights-drawer-actions">',
+            '<button type="button" id="dataInsightsQuickBtn" class="secondary-config-btn data-insights-action-btn" aria-label="Gerar insights" title="Gerar insights" data-tooltip="Gerar insights">Gerar insights</button>',
+            '<button type="button" id="dataInsightsCloseBtn" class="data-insights-close-btn" aria-label="Fechar inspecao">x</button>',
+            '</div>',
+            '</div>',
+            '<div class="data-insights-documents">',
+            '<span class="chips-label">Documentos</span>',
+            '<div id="dataInsightsDocumentsSlot" class="data-insights-documents-slot"></div>',
+            '</div>',
             '<div id="dataInsightsContent" class="data-insights-content"></div>',
+            '<div id="dataInsightsPopover" class="data-insights-popover" hidden></div>',
         ].join('');
 
-        chatMessages.parentElement.insertBefore(panel, chatMessages);
-        document.getElementById('dataInsightsToggle').checked = isInsightsInspectionEnabled();
+        chatContainer.appendChild(panel);
+        document.getElementById('dataInsightsQuickBtn')?.addEventListener('click', function(event) {
+            event.stopPropagation();
+            generateInsights();
+        });
+        document.getElementById('dataInsightsCloseBtn')?.addEventListener('click', closeInsightsDrawer);
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(document.getElementById('dataInsightsQuickBtn'));
+        }
+        moveRagDocumentsIntoDrawer();
         updateInsightsPanelVisibility();
     }
 
-    function maybeScheduleInsightsInspection() {
+    function ensureInsightsControls() {
+        const form = document.getElementById('ragUploadForm');
+
+        if (!form || document.getElementById('dataInsightsDrawerBtn')) {
+            return;
+        }
+
+        const drawerButton = document.createElement('button');
+
+        drawerButton.type = 'button';
+        drawerButton.id = 'dataInsightsDrawerBtn';
+        drawerButton.className = 'secondary-config-btn data-insights-action-btn';
+        drawerButton.setAttribute('aria-label', 'Resumo do documento');
+        drawerButton.setAttribute('title', 'Resumo do documento');
+        drawerButton.setAttribute('data-tooltip', 'Resumo do documento');
+        drawerButton.textContent = 'Resumo';
+        drawerButton.hidden = true;
+        drawerButton.addEventListener('click', function(event) {
+            event.stopPropagation();
+            openInsightsDrawer();
+        });
+
+        form.appendChild(drawerButton);
+
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(drawerButton);
+        }
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('#dataInsightsQuickBtn') && !event.target.closest('.data-insights-popover')) {
+                closeInsightsPopover();
+            }
+        });
+    }
+
+    function moveRagDocumentsIntoDrawer() {
+        const list = document.getElementById('ragDocumentList');
+        const slot = document.getElementById('dataInsightsDocumentsSlot');
+
+        if (!list || !slot || slot.contains(list)) {
+            return;
+        }
+
+        if (!document.getElementById('ragDocumentListHome')) {
+            const marker = document.createElement('span');
+            marker.id = 'ragDocumentListHome';
+            marker.hidden = true;
+            list.parentElement?.insertBefore(marker, list);
+        }
+
+        slot.appendChild(list);
+    }
+
+    function restoreRagDocumentsHome() {
+        const list = document.getElementById('ragDocumentList');
+        const marker = document.getElementById('ragDocumentListHome');
+
+        if (!list || !marker || !marker.parentElement) {
+            return;
+        }
+
+        marker.parentElement.insertBefore(list, marker);
+        marker.remove();
+    }
+
+    function generateInsights() {
         if (!hasSelectedRagInsightDocuments()) {
             stopInsightsInspection();
             return;
         }
 
-        if (!isInsightsInspectionEnabled()) {
-            stopInsightsInspection();
-            return;
-        }
-
+        openInsightsDrawer();
         scheduleInsightsInspection();
     }
 
@@ -154,7 +226,7 @@
     function inspectSelectedRagDocuments() {
         ensureInsightsPanel();
 
-        if (!isDataAnalystActive() || !isInsightsInspectionEnabled()) {
+        if (!isDataAnalystActive()) {
             stopInsightsInspection();
             return;
         }
@@ -190,32 +262,18 @@
                 throw new Error(payload.error || 'Nao foi possivel inspecionar os dados.');
             }
 
-            if (!isInsightsInspectionEnabled() || selectedRagInsightDocumentIds().join(',') !== selectedDocumentSignature) {
+            if (selectedRagInsightDocumentIds().join(',') !== selectedDocumentSignature) {
                 return;
             }
 
             renderInsightsPanel(payload.inspection, payload.sources || []);
+            openInsightsPopover();
             setInsightsStatus('', false);
         })
         .catch((error) => {
             clearInsightsContent();
             setInsightsStatus(error.message || 'Nao foi possivel inspecionar os dados.', true);
         });
-    }
-
-    function setInsightsInspectionEnabled(enabled) {
-        localStorage.setItem(INSPECT_STORAGE_KEY, enabled ? '1' : '0');
-
-        if (enabled) {
-            maybeScheduleInsightsInspection();
-            return;
-        }
-
-        stopInsightsInspection();
-    }
-
-    function isInsightsInspectionEnabled() {
-        return localStorage.getItem(INSPECT_STORAGE_KEY) === '1';
     }
 
     function stopInsightsInspection() {
@@ -226,20 +284,37 @@
 
     function updateInsightsPanelVisibility() {
         const panel = document.getElementById('dataInsightsPanel');
-        const toggle = document.querySelector('.data-insights-toggle');
+        const quickButton = document.getElementById('dataInsightsQuickBtn');
+        const drawerButton = document.getElementById('dataInsightsDrawerBtn');
+        const hasDocuments = hasRagInsightDocuments();
         const hasSelectedDocuments = hasSelectedRagInsightDocuments();
 
-        if (toggle) {
-            toggle.hidden = !hasSelectedDocuments;
+        if (quickButton) {
+            quickButton.hidden = !hasSelectedDocuments;
+        }
+
+        if (drawerButton) {
+            drawerButton.hidden = !hasDocuments;
         }
 
         if (panel) {
-            panel.hidden = !hasSelectedDocuments;
+            panel.hidden = false;
+            panel.classList.toggle('available', hasDocuments);
+        }
+
+        if (!hasDocuments) {
+            closeInsightsDrawer();
+            closeInsightsPopover();
         }
 
         if (!hasSelectedDocuments) {
+            closeInsightsPopover();
             stopInsightsInspection();
         }
+    }
+
+    function hasRagInsightDocuments() {
+        return document.querySelectorAll('.rag-document-checkbox').length > 0;
     }
 
     function hasSelectedRagInsightDocuments() {
@@ -257,6 +332,7 @@
         content.innerHTML = '';
         content.appendChild(insightsContainer);
         renderInsights(insightsContainer, inspection, sources);
+        renderInsightsPopover(insightsContainer);
     }
 
     function createInsightsContainer() {
@@ -271,7 +347,7 @@
             '</div>',
             '</div>',
             '<div class="insights-chips-wrapper">',
-            '<span class="chips-label">Sugestoes de exploracao para este documento:</span>',
+            '<span class="chips-label">Sugestoes</span>',
             '<div class="dynamic-chips-container"></div>',
             '</div>',
         ].join('');
@@ -297,6 +373,7 @@
             button.addEventListener('click', () => {
                 const query = buildInsightQuery(item.query || button.textContent, chartType);
 
+                closeInsightsPopover();
                 if (typeof window.OlliverseSubmitMessage === 'function') {
                     window.OlliverseSubmitMessage(query);
                 }
@@ -312,6 +389,73 @@
             '',
             `Use os documentos ativos e responda com uma tabela Markdown contendo as categorias e os valores numericos para plotagem. Tipo sugerido: ${chartType}.`,
         ].join('\n');
+    }
+
+    function openInsightsDrawer() {
+        const panel = document.getElementById('dataInsightsPanel');
+
+        if (!hasRagInsightDocuments()) {
+            return;
+        }
+
+        panel?.classList.add('open');
+        panel?.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeInsightsDrawer() {
+        const panel = document.getElementById('dataInsightsPanel');
+
+        panel?.classList.remove('open');
+        panel?.setAttribute('aria-hidden', 'true');
+    }
+
+    function openInsightsPopover() {
+        const popover = document.getElementById('dataInsightsPopover');
+
+        if (!hasSelectedRagInsightDocuments()) {
+            return;
+        }
+
+        renderInsightsPopover();
+
+        if (popover) {
+            popover.hidden = false;
+        }
+    }
+
+    function closeInsightsPopover() {
+        const popover = document.getElementById('dataInsightsPopover');
+
+        if (popover) {
+            popover.hidden = true;
+        }
+    }
+
+    function renderInsightsPopover(sourceContainer = null) {
+        const popover = document.getElementById('dataInsightsPopover');
+        const chips = sourceContainer
+            ? Array.from(sourceContainer.querySelectorAll('.insight-chip-btn'))
+            : Array.from(document.querySelectorAll('#dataInsightsContent .insight-chip-btn'));
+
+        if (!popover) {
+            return;
+        }
+
+        popover.innerHTML = '';
+
+        if (chips.length === 0) {
+            const empty = document.createElement('span');
+            empty.className = 'data-insights-empty';
+            empty.textContent = 'Preparando sugestoes...';
+            popover.appendChild(empty);
+            return;
+        }
+
+        chips.forEach((chip) => {
+            const clone = chip.cloneNode(true);
+            clone.addEventListener('click', () => chip.click());
+            popover.appendChild(clone);
+        });
     }
 
     function selectedRagInsightDocumentIds() {
