@@ -237,7 +237,7 @@ function detectCodeLanguage(block) {
 }
 
 function appendCopyResponseButton(messageGroup, text) {
-    const actions = createMessageActions();
+    const actions = messageGroup.querySelector('.message-actions') || createMessageActions();
     const copyButton = document.createElement('button');
 
     copyButton.type = 'button';
@@ -251,7 +251,9 @@ function appendCopyResponseButton(messageGroup, text) {
     attachActionTooltip(copyButton);
 
     actions.appendChild(copyButton);
-    messageGroup.appendChild(actions);
+    if (!actions.parentElement) {
+        messageGroup.appendChild(actions);
+    }
 }
 
 function createMessageActions() {

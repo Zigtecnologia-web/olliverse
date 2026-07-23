@@ -13,6 +13,7 @@
         deactivate() {
             window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
             document.getElementById('dataInsightsPanel')?.remove();
+            removeTablePlotActions();
         },
 
         processMessage(messageElement) {
@@ -36,6 +37,8 @@
 
                 renderChartBlock(block, false);
             });
+
+            ensureTablePlotAction(messageElement);
         },
 
         renderInsights(containerElement, inspectionJson, sources) {
@@ -303,7 +306,7 @@
         return [
             query,
             '',
-            `Use os documentos ativos e gere um grafico do tipo ${chartType} em um bloco json-chart.`,
+            `Use os documentos ativos e responda com uma tabela Markdown contendo as categorias e os valores numericos para plotagem. Tipo sugerido: ${chartType}.`,
         ].join('\n');
     }
 
@@ -366,21 +369,268 @@
         host.replaceWith(chartWrapper);
 
         chartWrapper.dataset.rawPayload = JSON.stringify(payload);
-        initializeChartSwitcher(chartWrapper, payload);
+        mountChartWrapper(chartWrapper, payload);
+    }
 
-        if (typeof attachActionTooltip === 'function') {
-            attachActionTooltip(downloadButton);
+    function ensureTablePlotAction(messageElement) {
+        const messageGroup = messageElement.closest('.message-group.assistant');
+        const payload = detectStructuredDataPayload(messageElement);
+        const existingButton = messageGroup?.querySelector('.data-chart-plot-btn');
+
+        if (!messageGroup) {
+            return;
         }
 
-        downloadButton.addEventListener('click', function() {
-            const chart = chartWrapper._olliverseChartInstance;
+        if (!payload) {
+            existingButton?.remove();
+            return;
+        }
 
-            if (!chart) {
-                return;
+        const button = existingButton || createTablePlotButton();
+
+        button.dataset.chartPayload = JSON.stringify(payload);
+
+        if (!existingButton) {
+            const actions = messageGroup.querySelector('.message-actions') || createMessageActionsElement();
+
+            actions.appendChild(button);
+            if (!actions.parentElement) {
+                messageGroup.appendChild(actions);
+            }
+        }
+    }
+
+    function createTablePlotButton() {
+        const button = document.createElement('button');
+
+        button.type = 'button';
+        button.className = 'message-action-btn data-chart-plot-btn';
+        button.setAttribute('aria-label', 'Plotar grafico');
+        button.setAttribute('data-tooltip', 'Plotar grafico');
+        button.innerHTML = `${pluginIconSvg('bar-chart-3')}<span>Plotar grafico</span>`;
+        button.addEventListener('click', function() {
+            plotDetectedTable(button);
+        });
+
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(button);
+        }
+
+        return button;
+    }
+
+    function createMessageActionsElement() {
+        const actions = document.createElement('div');
+
+        actions.className = 'message-actions';
+
+        return actions;
+    }
+
+    function plotDetectedTable(button) {
+        const messageGroup = button.closest('.message-group.assistant');
+
+        if (!messageGroup) {
+            return;
+        }
+
+        let payload;
+
+        try {
+            payload = normalizeChartValues(JSON.parse(button.dataset.chartPayload || '{}'));
+            validatePayload(payload);
+        } catch (error) {
+            console.warn('Falha ao preparar dados tabulares para grafico.', error);
+            return;
+        }
+
+        const chartWrapper = createChartWrapper(payload);
+        const existingChart = messageGroup.querySelector('.plugin-chart-wrapper[data-chart-source="table"]');
+
+        chartWrapper.dataset.chartSource = 'table';
+        chartWrapper.dataset.rawPayload = JSON.stringify(payload);
+
+        if (existingChart) {
+            existingChart.replaceWith(chartWrapper);
+        } else {
+            messageGroup.appendChild(chartWrapper);
+        }
+
+        mountChartWrapper(chartWrapper, payload);
+        chartWrapper.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function mountChartWrapper(chartWrapper, payload) {
+        const downloadButton = chartWrapper.querySelector('.chart-download-btn');
+
+        window.requestAnimationFrame(() => {
+            initializeChartSwitcher(chartWrapper, payload);
+        });
+
+        if (downloadButton) {
+            if (typeof attachActionTooltip === 'function') {
+                attachActionTooltip(downloadButton);
             }
 
-            downloadChartImage(chart, payload);
+            downloadButton.addEventListener('click', function() {
+                const chart = chartWrapper._olliverseChartInstance;
+
+                if (!chart) {
+                    return;
+                }
+
+                downloadChartImage(chart, payload);
+            });
+        }
+    }
+
+    function removeTablePlotActions() {
+        document.querySelectorAll('.data-chart-plot-btn').forEach((button) => button.remove());
+        document.querySelectorAll('.plugin-chart-wrapper[data-chart-source="table"]').forEach((chart) => chart.remove());
+    }
+
+    function detectStructuredDataPayload(messageElement) {
+        const tablePayload = detectTablePayload(messageElement);
+
+        if (tablePayload) {
+            return tablePayload;
+        }
+
+        return detectPipeTablePayload(messageElement.textContent || '');
+    }
+
+    function detectTablePayload(messageElement) {
+        const tables = Array.from(messageElement.querySelectorAll('table'));
+
+        for (const table of tables) {
+            const payload = payloadFromTableRows(tableRows(table));
+
+            if (payload) {
+                return payload;
+            }
+        }
+
+        return null;
+    }
+
+    function tableRows(table) {
+        return Array.from(table.querySelectorAll('tr'))
+            .map((row) => Array.from(row.children).map((cell) => cell.textContent || ''))
+            .filter((cells) => cells.length >= 2);
+    }
+
+    function detectPipeTablePayload(text) {
+        const rows = String(text || '')
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line.includes('|'))
+            .map((line) => line.split('|').map((cell) => cell.trim()).filter((cell) => cell !== ''))
+            .filter((cells) => cells.length >= 2 && !cells.every((cell) => /^:?-{3,}:?$/.test(cell)));
+
+        return payloadFromTableRows(rows);
+    }
+
+    function payloadFromTableRows(rows) {
+        if (!Array.isArray(rows) || rows.length < 2) {
+            return null;
+        }
+
+        const columnCount = Math.max(...rows.map((row) => row.length));
+        const normalizedRows = rows
+            .filter((row) => row.length === columnCount)
+            .map((row) => row.map((cell) => String(cell || '').trim()));
+
+        if (normalizedRows.length < 2) {
+            return null;
+        }
+
+        const hasHeader = normalizedRows[0].some((cell) => !isChartNumberLike(cell));
+        const headers = hasHeader
+            ? normalizedRows[0].map(humanizeLabel)
+            : normalizedRows[0].map((_, index) => `Coluna ${index + 1}`);
+        const dataRows = hasHeader ? normalizedRows.slice(1) : normalizedRows;
+
+        if (dataRows.length === 0) {
+            return null;
+        }
+
+        const metricIndex = detectMetricColumn(dataRows, headers);
+
+        if (metricIndex === -1) {
+            return null;
+        }
+
+        const labelIndex = detectLabelColumn(dataRows, metricIndex);
+        const labels = dataRows.map((row, index) => row[labelIndex] || `Item ${index + 1}`);
+        const data = dataRows.map((row) => parseChartNumber(row[metricIndex]));
+
+        if (labels.length < 2 || !data.every((value) => Number.isFinite(value))) {
+            return null;
+        }
+
+        return {
+            type: suggestedChartType(headers[labelIndex], headers[metricIndex]),
+            title: chartTitleFromHeaders(headers[labelIndex], headers[metricIndex]),
+            labels,
+            data,
+        };
+    }
+
+    function detectMetricColumn(rows, headers) {
+        const preferredMetricWords = ['quantidade', 'qtd', 'total', 'valor', 'valores', 'nota', 'media', 'média', 'count'];
+        const candidates = headers.map((header, index) => {
+            const numericCount = rows.filter((row) => isChartNumberLike(row[index])).length;
+
+            return {
+                index,
+                numericCount,
+                preferred: preferredMetricWords.some((word) => normalizeKey(header).includes(normalizeKey(word))),
+            };
+        }).filter((candidate) => candidate.numericCount >= Math.max(2, Math.ceil(rows.length * 0.7)));
+
+        if (candidates.length === 0) {
+            return -1;
+        }
+
+        candidates.sort((left, right) => {
+            if (left.preferred !== right.preferred) {
+                return left.preferred ? -1 : 1;
+            }
+
+            return right.numericCount - left.numericCount;
         });
+
+        return candidates[0].index;
+    }
+
+    function detectLabelColumn(rows, metricIndex) {
+        const indexes = rows[0].map((_, index) => index).filter((index) => index !== metricIndex);
+        const textualIndex = indexes.find((index) => rows.some((row) => !isChartNumberLike(row[index])));
+
+        return textualIndex ?? indexes[0] ?? 0;
+    }
+
+    function suggestedChartType(labelHeader, metricHeader) {
+        const label = normalizeKey(labelHeader);
+        const metric = normalizeKey(metricHeader);
+
+        if (/(mes|mês|ano|data|periodo|periodo|dia|semana)/.test(label)) {
+            return 'line';
+        }
+
+        if (/(genero|sexo|status|situacao|distribuicao|distribuicao)/.test(label)
+            || /(percentual|porcentagem|%)/.test(metric)) {
+            return 'pie';
+        }
+
+        return 'bar';
+    }
+
+    function chartTitleFromHeaders(labelHeader, metricHeader) {
+        const label = humanizeLabel(labelHeader || 'Categoria');
+        const metric = humanizeLabel(metricHeader || 'Valor');
+
+        return `${metric} por ${label}`;
     }
 
     function looksLikeChartBlock(block) {
@@ -578,8 +828,10 @@
         if (selectedType === 'table') {
             setChartLoading(wrapper, false);
             canvas.hidden = true;
+            canvas.style.display = 'none';
             canvas.classList.add('chart-canvas-hidden');
             tableContainer.hidden = false;
+            tableContainer.style.display = 'block';
             tableContainer.innerHTML = tableHtml(payload);
 
             if (downloadButton) {
@@ -597,8 +849,10 @@
 
         setChartLoading(wrapper, true);
         canvas.hidden = false;
+        canvas.style.display = 'block';
         canvas.classList.add('chart-canvas-hidden');
         tableContainer.hidden = true;
+        tableContainer.style.display = 'none';
         tableContainer.innerHTML = '';
 
         let revealTimer = null;
@@ -615,6 +869,10 @@
             }, () => {
                 revealCanvas();
             }));
+            window.requestAnimationFrame(() => {
+                wrapper._olliverseChartInstance?.resize();
+                wrapper._olliverseChartInstance?.update('none');
+            });
             revealTimer = window.setTimeout(revealCanvas, 700);
         } catch (error) {
             window.clearTimeout(revealTimer);
@@ -725,6 +983,10 @@
             .replace(/\s+/g, '')
             .replace(/[R$€£%]/g, '')
             .replace(/[^\d,.\-]/g, '');
+
+        if (text === '' || text === '-' || !/\d/.test(text)) {
+            return NaN;
+        }
 
         const commaIndex = text.lastIndexOf(',');
         const dotIndex = text.lastIndexOf('.');

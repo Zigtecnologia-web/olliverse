@@ -23,6 +23,6 @@ Regras:
 - Use "pie" para distribuições proporcionais por categoria.
 - Use "bar" para comparações, rankings, contagens, somas ou médias por categoria.
 - Use "line" somente quando houver campo temporal ou sequência cronológica clara.
-- As perguntas devem pedir explicitamente um gráfico no formato json-chart.
+- As perguntas devem pedir uma tabela Markdown com categorias e valores numericos para que o Olliverse plote o grafico pelo botao local.
 - Não invente campos que não aparecem na amostra.
 PROMPT;

@@ -221,14 +221,6 @@ final readonly class ChatStreamHandler
      */
     private function chatOptions(): array
     {
-        if (!$this->pluginManager?->isActive('data_analyst')) {
-            return [];
-        }
-
-        return [
-            'options' => [
-                'temperature' => 0.1,
-            ],
-        ];
+        return [];
     }
 }

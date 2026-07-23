@@ -69,8 +69,16 @@
 }
 
 .dynamic-chart-canvas {
+    display: block;
+    height: 100%;
     opacity: 1;
     transition: opacity 0.12s ease;
+    width: 100%;
+}
+
+.dynamic-chart-canvas[hidden],
+.chart-table-container[hidden] {
+    display: none !important;
 }
 
 .chart-rendering .switcher-btn,
@@ -217,6 +225,25 @@
     color: #f75a68;
     font-size: 0.82rem;
     padding: 12px;
+}
+
+.data-chart-plot-btn {
+    gap: 7px;
+    padding: 0 10px;
+    width: auto;
+}
+
+.data-chart-plot-btn svg {
+    flex: 0 0 auto;
+    height: 15px;
+    width: 15px;
+}
+
+.data-chart-plot-btn span {
+    font-size: 0.76rem;
+    font-weight: 750;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .data-insights-edge-panel {

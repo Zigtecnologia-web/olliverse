@@ -706,12 +706,13 @@ Quando o plugin esta ligado:
 2. o `PluginManager` injeta o prompt de `plugins/data_analyst/includes/prompt.php` nas proximas chamadas ao Ollama;
 3. o frontend tambem recebe esses prompts em `activePluginPrompts` para orientar respostas da Web AI;
 4. o frontend carrega Chart.js local em `public/vendor/chart.js/chart.umd.js` e os assets do plugin sob demanda;
-5. blocos Markdown com linguagem `json-chart` sao convertidos em graficos responsivos no balao do assistente;
-6. quando o `data_analyst` esta ativo, o payload de chat enviado ao Ollama usa `options.temperature = 0.1` para reduzir variacoes sintaticas no bloco `json-chart`;
-7. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
-8. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
-9. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
-10. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos `json-chart` por imagens estaticas.
+5. o prompt do plugin orienta a IA a responder com analise textual e tabelas Markdown legiveis, nao com JSON cru;
+6. quando uma resposta do assistente contem uma tabela com categorias e valores numericos, o frontend exibe o botao **Plotar grafico** no rodape da mensagem;
+7. ao clicar em **Plotar grafico**, o plugin extrai os dados da tabela ja renderizada e cria um card Chart.js sem nova chamada ao Ollama;
+8. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
+9. a opcao **Inspecionar documento** pode gerar sugestoes analiticas sobre os documentos ativos logo acima da conversa;
+10. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
+11. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos de grafico por imagens estaticas.
 
 O fluxo de inspecao opcional usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
@@ -723,37 +724,35 @@ Quando o plugin esta ativo, a opcao **Inspecionar documento** fica desligada por
 4. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
 5. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
 6. o frontend renderiza um painel com resumo e chips de sugestoes acima da conversa;
-7. cada chip dispara uma pergunta normal do chat pedindo grafico `json-chart` com os documentos ativos.
+7. cada chip dispara uma pergunta normal do chat pedindo uma tabela Markdown com os documentos ativos.
 
-O prompt do plugin funciona como uma regra nativa de planejamento de grafico. Antes de gerar o bloco `json-chart`, o modelo deve inferir:
+O prompt do plugin funciona como uma regra nativa de preparacao de dados para grafico. Antes de montar a tabela Markdown, o modelo deve inferir:
 
-- dimensao de agrupamento, usada em `labels`;
-- metrica numerica, usada em `data`;
-- tipo de grafico adequado: `pie`, `bar` ou `line`.
+- dimensao de agrupamento, usada como coluna de categoria;
+- metrica numerica, usada como coluna de valor;
+- forma de leitura mais adequada para explicar o resultado ao usuario.
 
 Exemplos de inferencia:
 
-- "grafico por genero" usa cada genero como `labels` e a quantidade de alunos por genero como `data`;
-- "grafico por serie" usa cada serie como `labels` e a quantidade de alunos por serie como `data`;
-- "distribuicao por idade" usa cada idade como `labels` e a quantidade de alunos naquela idade como `data`;
-- "maior nota" ou "compare notas" usa nomes dos alunos como `labels` e as notas como `data`, salvo quando o usuario pedir outra metrica.
+- "grafico por genero" usa cada genero como categoria e a quantidade de alunos por genero como valor;
+- "grafico por serie" usa cada serie como categoria e a quantidade de alunos em cada serie como valor;
+- "distribuicao por idade" usa cada idade como categoria e a quantidade de alunos naquela idade como valor;
+- "maior nota" ou "compare notas" usa nomes dos alunos como categoria e as notas como valor, salvo quando o usuario pedir outra metrica.
 
-Por padrao, `data` deve usar quantidades absolutas. Percentuais so devem ser usados quando o usuario pedir explicitamente porcentagem.
+Por padrao, a coluna numerica deve usar quantidades absolutas. Percentuais so devem ser usados quando o usuario pedir explicitamente porcentagem.
 
-Contrato esperado para o bloco gerado pela IA:
+Contrato esperado para tabelas geradas pela IA:
 
-```json
-{
-  "type": "bar",
-  "title": "Titulo da Metrica",
-  "labels": ["Label 1", "Label 2"],
-  "data": [10, 25]
-}
+```markdown
+| Categoria | Quantidade |
+| --- | ---: |
+| Label 1 | 10 |
+| Label 2 | 25 |
 ```
 
-Tipos aceitos: `bar`, `pie` e `line`.
+O frontend procura tabelas Markdown renderizadas com pelo menos uma coluna textual/categorica e uma coluna numerica. Quando encontra uma tabela plotavel, injeta o botao **Plotar grafico** no rodape do balao da mensagem. O clique converte localmente as linhas da tabela em `labels` e `data`, sugere o tipo inicial do grafico e cria o card interativo.
 
-Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o payload normalizado no proprio card e permite alternar a visualizacao instantaneamente entre:
+Depois que um grafico e renderizado, o frontend guarda o payload normalizado no proprio card e permite alternar a visualizacao instantaneamente entre:
 
 - `bar`: grafico de barras;
 - `pie`: grafico de pizza;
@@ -762,7 +761,7 @@ Depois que um bloco `json-chart` valido e renderizado, o frontend guarda o paylo
 
 A alternancia acontece apenas no JavaScript do navegador. Ela destroi a instancia Chart.js atual, recria o grafico escolhido quando necessario e nao dispara novas requisicoes para o Ollama. No modo tabela, o botao de download fica desabilitado porque nao ha canvas ativo para exportar como PNG.
 
-O contrato oficial nao aceita `datasets`, `dados`, `valores`, `rotulos`, objetos aninhados, comentarios ou texto dentro do bloco `json-chart`. O frontend ainda mantem normalizacao defensiva para respostas imperfeitas, incluindo remover cercas Markdown residuais como `json-chart`/`json` e comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando um payload estrito nao pode ser interpretado, a falha fica registrada no console e o restante da mensagem Markdown continua renderizando normalmente. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
+Blocos antigos `json-chart` continuam sendo aceitos como compatibilidade defensiva para historico, respostas antigas ou modelos que ainda retornem esse formato. O frontend mantem normalizacao para respostas imperfeitas, incluindo remover cercas Markdown residuais como `json-chart`/`json` e comentarios `//` ou `/* ... */` antes de interpretar payloads de grafico. Quando um payload nao pode ser interpretado, a falha fica registrada no console e o restante da mensagem Markdown continua renderizando normalmente. Quando a Web AI retorna um bloco `json` comum com formato claro de grafico (`type`, `labels` e `data`), o plugin tambem tenta renderizar esse bloco como grafico; JSON comum que nao pareca grafico continua aparecendo como codigo.
 
 Antes de entregar os dados ao Chart.js, o plugin converte valores em formato numerico comum ou brasileiro, como `8,5`, `1.234,56`, `12%` e `R$ 100`, para numeros JavaScript reais. Se algum valor nao puder ser convertido, a falha fica no console e o restante da mensagem continua renderizando normalmente.
 
@@ -891,7 +890,7 @@ GET /index.php?action=export_pdf&chat_id=1
 
 Retorna download `application/pdf` gerado com Dompdf. O conteudo das mensagens passa por Parsedown em modo seguro e e renderizado no template `views/pdf/chat_template.php`.
 
-O mesmo endpoint tambem aceita `POST` com `chart_images` em JSON. Esse campo e usado pelo frontend da conversa atual para enviar imagens `data:image/png;base64,...` dos canvases Chart.js ativos, preservando os graficos no PDF no mesmo ponto em que os blocos `json-chart` aparecem no historico.
+O mesmo endpoint tambem aceita `POST` com `chart_images` em JSON. Esse campo e usado pelo frontend da conversa atual para enviar imagens `data:image/png;base64,...` dos canvases Chart.js ativos, preservando os graficos no PDF no mesmo ponto em que aparecem na conversa. Blocos antigos `json-chart` no historico tambem podem ser substituidos por imagens quando o frontend enviar a captura correspondente.
 
 ### 9.9 Enviar mensagem ao chat
 
@@ -1341,7 +1340,7 @@ Responsavel por gerar o PDF de uma conversa.
 Faz:
 
 - converter conteudo Markdown das mensagens com Parsedown em modo seguro;
-- substituir blocos `json-chart` por imagens PNG recebidas do frontend durante a exportacao analitica;
+- substituir graficos ativos por imagens PNG recebidas do frontend durante a exportacao analitica;
 - carregar `views/pdf/chat_template.php`;
 - configurar Dompdf para pagina A4;
 - devolver o binario usado pelo endpoint `action=export_pdf`.
@@ -1476,7 +1475,7 @@ Faz:
 - atualizar `window.OlliverseConfig.plugins`;
 - carregar CSS, dependencias JS e script do plugin sob demanda;
 - chamar hooks opcionais `activate` e `deactivate` dos plugins;
-- reprocessar mensagens do assistente para renderizar blocos `json-chart` quando o plugin esta ativo.
+- reprocessar mensagens do assistente para detectar tabelas plotaveis e renderizar graficos quando o plugin esta ativo.
 
 ### `public/assets/js/model-panel.js`
 
@@ -1710,7 +1709,7 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Gerencia documentos adicionados com metadados e exclusao em cascata.
 - [x] Exibe a Central de Documentacao pelo menu principal.
 - [x] Ativa/desativa plugins por sessao.
-- [x] Renderiza graficos via plugin `data_analyst` a partir de blocos `json-chart`.
+- [x] Renderiza graficos via plugin `data_analyst` a partir de tabelas Markdown e botao local.
 - [x] Inspeciona arquivos JSON/CSV e sugere consultas analiticas por chips.
 
 ## 20. Resumo executivo

@@ -10,7 +10,7 @@ Esta especificação atualiza o **Plugin de Análise de Dados (Data Analyst)** d
 
 * **Zero Duplicação:** Aproveitar integralmente o ecossistema de arquivos já anexados, processados e armazenados no SQLite do Olliverse.
 * **Inspeção Baseada em Contexto:** Ler o conteúdo ou os metadados do documento indexado na sessão atual para gerar proativamente os chips de sugestão analítica.
-* **Orquestração de Borda:** Manter a renderização visual (Chart.js) e o tratamento de UI na borda, consumindo o payload estruturado fornecido pelo LLM a partir dos dados do SQLite.
+* **Orquestração de Borda:** Manter a renderização visual (Chart.js) e o tratamento de UI na borda, consumindo tabelas Markdown estruturadas fornecidas pelo LLM a partir dos dados do SQLite.
 
 ---
 
@@ -31,7 +31,7 @@ Esta especificação atualiza o **Plugin de Análise de Dados (Data Analyst)** d
 
 
 4. **Execução e Renderização de Gráficos:**
-* Ao clicar em um chip ou perguntar sobre os dados, o RAG busca os registros no SQLite, o modelo processa as métricas e retorna o bloco `json-chart`, que é transformado em um gráfico dinâmico pelo Chart.js.
+* Ao clicar em um chip ou perguntar sobre os dados, o RAG busca os registros no SQLite, o modelo processa as métricas e retorna uma tabela Markdown com categorias e valores numéricos. O frontend detecta a tabela e exibe o botão **Plotar Gráfico**, que transforma os dados já presentes na mensagem em um gráfico dinâmico pelo Chart.js.
 
 
 
@@ -92,4 +92,4 @@ Injetado no chat quando um arquivo indexado é vinculado à sessão com o plugin
 
 1. **Reaproveitamento de RAG:** O plugin não cria nenhuma interface nova de upload; ele escuta e consome os dados do arquivo já indexado e armazenado no SQLite da aplicação.
 2. **Inspeção Contextual:** Ao ativar o plugin com um documento selecionado na sessão, o Olliverse envia uma amostra extraída do SQLite para o LLM gerar o JSON de sugestões analíticas.
-3. **Ação Integrada:** Os chips de sugestão gerados na borda utilizam o fluxo de chat existente para buscar dados no RAG, processar via LLM e renderizar os gráficos interativos com Chart.js.
+3. **Ação Integrada:** Os chips de sugestão gerados na borda utilizam o fluxo de chat existente para buscar dados no RAG, processar via LLM e preparar tabelas Markdown plotáveis pelo botão local do plugin.
