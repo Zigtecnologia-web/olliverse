@@ -57,13 +57,23 @@ final class PdfExportService
         }
 
         $chat = $payload['chat'];
-        $chartQueue = array_values($chartImages);
+        $legacyChartQueue = $this->legacyChartQueue($chartImages);
+        $chartImagesByMessage = $this->chartImagesByMessage($chartImages);
+        $assistantIndex = 0;
         $messages = array_map(
-            function (array $message) use (&$chartQueue): array {
+            function (array $message) use (&$legacyChartQueue, $chartImagesByMessage, &$assistantIndex): array {
                 $html = $this->parsedown->text($message['content']);
 
-                if ($message['role'] !== 'user' && $chartQueue !== []) {
-                    $html = $this->injectChartImages($html, $chartQueue);
+                if ($message['role'] !== 'user') {
+                    $messageChartQueue = $chartImagesByMessage[$assistantIndex] ?? [];
+
+                    if ($messageChartQueue !== []) {
+                        $html = $this->injectChartImages($html, $messageChartQueue, true);
+                    } elseif ($legacyChartQueue !== []) {
+                        $html = $this->injectChartImages($html, $legacyChartQueue, false);
+                    }
+
+                    $assistantIndex++;
                 }
 
                 return [
@@ -81,9 +91,9 @@ final class PdfExportService
         return (string) ob_get_clean();
     }
 
-    private function injectChartImages(string $html, array &$chartQueue): string
+    private function injectChartImages(string $html, array &$chartQueue, bool $appendUnmatched): string
     {
-        return (string) preg_replace_callback(
+        $html = (string) preg_replace_callback(
             '/<pre><code class="language-json-chart">.*?<\/code><\/pre>/s',
             static function (array $matches) use (&$chartQueue): string {
                 $image = array_shift($chartQueue);
@@ -99,5 +109,58 @@ final class PdfExportService
             },
             $html
         );
+
+        if (!$appendUnmatched || $chartQueue === []) {
+            return $html;
+        }
+
+        foreach ($chartQueue as $image) {
+            if (!is_string($image) || preg_match('/^data:image\/png;base64,[A-Za-z0-9+\/=]+$/', $image) !== 1) {
+                continue;
+            }
+
+            $html .= sprintf(
+                '<figure class="chart-export-figure"><img src="%s" alt="Gráfico exportado da conversa"></figure>',
+                htmlspecialchars($image, ENT_QUOTES, 'UTF-8')
+            );
+        }
+
+        $chartQueue = [];
+
+        return $html;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function legacyChartQueue(array $chartImages): array
+    {
+        return array_values(array_filter($chartImages, 'is_string'));
+    }
+
+    /**
+     * @return array<int, array<int, string>>
+     */
+    private function chartImagesByMessage(array $chartImages): array
+    {
+        $imagesByMessage = [];
+
+        foreach ($chartImages as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $messageIndex = (int) ($item['message_index'] ?? -1);
+            $image = $item['image'] ?? null;
+
+            if ($messageIndex < 0 || !is_string($image)) {
+                continue;
+            }
+
+            $imagesByMessage[$messageIndex] ??= [];
+            $imagesByMessage[$messageIndex][] = $image;
+        }
+
+        return $imagesByMessage;
     }
 }

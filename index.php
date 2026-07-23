@@ -166,7 +166,10 @@ if (($_GET['action'] ?? '') === 'export_pdf') {
         $postedImages = json_decode((string) ($_POST['chart_images'] ?? '[]'), true);
 
         if (is_array($postedImages)) {
-            $chartImages = array_values(array_filter($postedImages, 'is_string'));
+            $chartImages = array_values(array_filter(
+                $postedImages,
+                static fn (mixed $item): bool => is_string($item) || is_array($item)
+            ));
         }
     }
 

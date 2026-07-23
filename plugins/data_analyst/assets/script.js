@@ -44,6 +44,10 @@
         renderInsights(containerElement, inspectionJson, sources) {
             renderInsights(containerElement, inspectionJson, sources);
         },
+
+        exportChartImage(chartWrapper) {
+            return exportChartImage(chartWrapper);
+        },
     };
 
     ensureInsightsPanel();
@@ -1443,6 +1447,53 @@
         document.body.appendChild(link);
         link.click();
         link.remove();
+    }
+
+    function exportChartImage(chartWrapper) {
+        if (!chartWrapper) {
+            return '';
+        }
+
+        const chart = chartWrapper._olliverseChartInstance;
+
+        if (chart && typeof chart.toBase64Image === 'function') {
+            return chart.toBase64Image('image/png', 1);
+        }
+
+        if (!window.Chart) {
+            return '';
+        }
+
+        try {
+            const payload = JSON.parse(chartWrapper.dataset.rawPayload || '{}');
+            const canvas = document.createElement('canvas');
+            const activeType = chartWrapper.querySelector('.switcher-btn.active')?.dataset.chartType;
+            const type = normalizeChartType(activeType === 'table' ? payload.type || 'bar' : activeType || payload.type || 'bar');
+
+            canvas.width = 900;
+            canvas.height = 420;
+            canvas.style.width = '900px';
+            canvas.style.height = '420px';
+
+            const exportOptions = chartOptions({
+                ...payload,
+                type,
+            });
+
+            exportOptions.options.responsive = false;
+            exportOptions.options.animation = false;
+
+            const exportChart = new Chart(canvas.getContext('2d'), exportOptions);
+
+            exportChart.update('none');
+            const image = exportChart.toBase64Image('image/png', 1);
+
+            exportChart.destroy();
+
+            return image;
+        } catch (error) {
+            return '';
+        }
     }
 
     function chartFileName(title) {

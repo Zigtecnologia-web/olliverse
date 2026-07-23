@@ -631,29 +631,59 @@ function exportPdfWithCharts(link) {
 }
 
 function collectActiveChartImages() {
+    const assistantGroups = Array.from(document.querySelectorAll('#chatMessages .message-group.assistant'))
+        .filter(isExportableAssistantGroup);
+
     return Array.from(document.querySelectorAll('#chatMessages .plugin-chart-wrapper'))
         .map((wrapper) => {
+            const messageGroup = wrapper.closest('.message-group.assistant');
             const canvas = wrapper.querySelector('canvas.dynamic-chart-canvas');
             const chart = wrapper._olliverseChartInstance;
+            const messageIndex = assistantGroups.indexOf(messageGroup);
+            const pluginExportImage = window.OlliversePlugins?.data_analyst?.exportChartImage?.(wrapper) || '';
 
-            if (canvas?.hidden || canvas?.offsetParent === null) {
-                return '';
+            if (messageIndex < 0) {
+                return null;
             }
 
             try {
+                if (pluginExportImage) {
+                    return {
+                        message_index: messageIndex,
+                        image: pluginExportImage,
+                    };
+                }
+
+                if (canvas?.hidden || canvas?.offsetParent === null) {
+                    return null;
+                }
+
                 if (chart && typeof chart.toBase64Image === 'function') {
-                    return chart.toBase64Image('image/png', 1);
+                    return {
+                        message_index: messageIndex,
+                        image: chart.toBase64Image('image/png', 1),
+                    };
                 }
 
                 if (!canvas) {
-                    return '';
+                    return null;
                 }
 
-                return canvas.toDataURL('image/png');
+                return {
+                    message_index: messageIndex,
+                    image: canvas.toDataURL('image/png'),
+                };
             } catch (error) {
-                return '';
+                return null;
             }
-        });
+        })
+        .filter(Boolean);
+}
+
+function isExportableAssistantGroup(group) {
+    return Boolean(group?.querySelector?.(
+        '.assistant-markdown-source, .copy-response-btn, .plugin-chart-wrapper, .rag-source-info'
+    ));
 }
 
 function setHistoryStatus(message, isError = false) {
