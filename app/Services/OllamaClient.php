@@ -157,8 +157,6 @@ final readonly class OllamaClient
             self::processStreamLine(trim($streamBuffer), $assistantResponse, $streamError, $onPayload);
         }
 
-        curl_close($ch);
-
         $requestError = $curlError !== '' ? $curlError : $streamError;
 
         if ($requestError !== '') {
@@ -178,13 +176,11 @@ final readonly class OllamaClient
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
 
         $response = curl_exec($ch);
+        $curlError = curl_error($ch);
 
-        if (curl_error($ch)) {
-            curl_close($ch);
+        if ($curlError !== '') {
             return [];
         }
-
-        curl_close($ch);
 
         $result = json_decode(is_string($response) ? $response : '', true);
 
@@ -209,7 +205,6 @@ final readonly class OllamaClient
 
         $response = curl_exec($ch);
         $curlError = curl_error($ch);
-        curl_close($ch);
 
         if ($curlError !== '') {
             throw new \RuntimeException('Falha ao conectar no Ollama: ' . $curlError);
