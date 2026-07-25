@@ -22,6 +22,11 @@ aproximam a experiencia de uma ferramenta de trabalho completa.
 - Interface web compacta em PHP, JavaScript vanilla e CSS proprio.
 - Dependencias de frontend vendorizadas localmente, sem CDNs para os bundles ativos.
 
+## Documentacao de estudo
+
+- [Rota de Estudo do Olliverse](Doc/Rota-de-Estudo.md): trilhas organizadas para estudar arquitetura, SQLite, contexto, RAG, embeddings, DuckDB, Web AI, historico, plugins e exportacao.
+- [Documentacao tecnica completa](Doc/README.md): handbook principal com fluxos, contratos HTTP, banco, servicos e comportamento atual.
+
 ## Stack
 
 - PHP `>= 8.2`.

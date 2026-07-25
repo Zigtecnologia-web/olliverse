@@ -22,6 +22,8 @@ Em termos praticos, a ferramenta funciona como um cliente web local para Ollama,
 - alternar entre o provedor Ollama e o provedor Web AI no navegador.
 - disponibilizar uma Central de Documentacao dentro da propria aplicacao.
 
+Para estudar o projeto por assunto, consulte tambem a [Rota de Estudo do Olliverse](Rota-de-Estudo.md), que separa arquitetura, SQLite, contexto, RAG, embeddings, DuckDB, Web AI e plugins por trilhas.
+
 ## 2. Tipo de ferramenta que esta sendo construida
 
 O projeto esta se consolidando como um **ambiente local de trabalho com IA**.
