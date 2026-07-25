@@ -266,7 +266,7 @@
                 return;
             }
 
-            renderInsightsPanel(payload.inspection, payload.sources || []);
+            renderInsightsPanel(payload.inspection, payload.sources || [], payload.engine || '');
             openInsightsPopover();
             setInsightsStatus('', false);
         })
@@ -321,9 +321,9 @@
         return selectedRagInsightDocumentIds().length > 0;
     }
 
-    function renderInsightsPanel(inspection, sources) {
+    function renderInsightsPanel(inspection, sources, engine) {
         const content = document.getElementById('dataInsightsContent');
-        const insightsContainer = createInsightsContainer();
+        const insightsContainer = createInsightsContainer(engine);
 
         if (!content) {
             return;
@@ -335,14 +335,15 @@
         renderInsightsPopover(insightsContainer);
     }
 
-    function createInsightsContainer() {
+    function createInsightsContainer(engine) {
         const container = document.createElement('div');
+        const engineLabel = dataEngineLabel(engine);
         container.className = 'data-insights-container';
         container.innerHTML = [
             '<div class="insights-header">',
             '<span class="insights-icon" aria-hidden="true">Data</span>',
             '<div class="insights-text">',
-            '<strong>Analise inteligente (SQLite / RAG)</strong>',
+            `<strong>Analise inteligente (${engineLabel})</strong>`,
             '<p class="insights-summary-text"></p>',
             '</div>',
             '</div>',
@@ -353,6 +354,18 @@
         ].join('');
 
         return container;
+    }
+
+    function dataEngineLabel(engine) {
+        if (engine === 'duckdb-pdo') {
+            return 'DuckDB';
+        }
+
+        if (engine === 'sqlite-fallback') {
+            return 'SQLite';
+        }
+
+        return 'RAG';
     }
 
     function renderInsights(containerElement, inspectionJson, sources) {
@@ -371,6 +384,11 @@
             button.className = 'insight-chip-btn';
             button.textContent = item.title || 'Explorar dados';
             button.addEventListener('click', () => {
+                if (item.sql && item.document_id) {
+                    executeAnalyticSuggestion(item);
+                    return;
+                }
+
                 const query = buildInsightQuery(item.query || button.textContent, chartType);
 
                 closeInsightsPopover();
@@ -381,6 +399,75 @@
 
             chipsContainer.appendChild(button);
         });
+    }
+
+    function executeAnalyticSuggestion(item) {
+        const body = new URLSearchParams({
+            document_id: String(item.document_id || ''),
+            sql: item.sql || '',
+            chart_type: item.chart_type || 'bar',
+            title: item.title || '',
+        });
+
+        closeInsightsPopover();
+        setInsightsStatus('Consultando dados locais...', false);
+
+        fetch(`${window.location.pathname}?action=data_query`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+        })
+        .then((response) => response.json().then((payload) => ({ ok: response.ok, payload })))
+        .then(({ ok, payload }) => {
+            if (!ok || !payload.success) {
+                throw new Error(payload.error || 'Nao foi possivel consultar os dados.');
+            }
+
+            renderAnalyticChartResult(payload.payload, item);
+            setInsightsStatus('', false);
+        })
+        .catch((error) => {
+            setInsightsStatus(error.message || 'Nao foi possivel consultar os dados.', true);
+        });
+    }
+
+    function renderAnalyticChartResult(result, item) {
+        const chartConfig = result?.chart_config || {};
+        const dataset = Array.isArray(chartConfig.datasets) ? chartConfig.datasets[0] : null;
+        const payload = normalizeChartValues({
+            type: chartConfig.type || item.chart_type || 'bar',
+            title: item.title || dataset?.label || 'Consulta analitica',
+            labels: Array.isArray(chartConfig.labels) ? chartConfig.labels : [],
+            data: Array.isArray(dataset?.data) ? dataset.data : [],
+            datasets: chartConfig.datasets,
+        });
+
+        validatePayload(payload);
+
+        const messages = document.getElementById('chatMessages');
+        const group = document.createElement('div');
+        const message = document.createElement('div');
+        const intro = document.createElement('p');
+        const query = document.createElement('code');
+        const chartWrapper = createChartWrapper(payload);
+
+        group.className = 'message-group assistant';
+        message.className = 'message assistant';
+        intro.textContent = `${item.query || item.title || 'Consulta analitica'} (${result.engine || 'motor local'})`;
+        query.textContent = result.query_executed || item.sql || '';
+        chartWrapper.dataset.chartSource = 'analytics';
+        chartWrapper.dataset.rawPayload = JSON.stringify(payload);
+
+        message.appendChild(intro);
+        message.appendChild(query);
+        group.appendChild(message);
+        group.appendChild(chartWrapper);
+        messages?.appendChild(group);
+
+        mountChartWrapper(chartWrapper, payload);
+        chartWrapper.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     function buildInsightQuery(query, chartType) {
@@ -644,7 +731,9 @@
             return tablePayload;
         }
 
-        return detectPipeTablePayload(messageElement.textContent || '');
+        const text = messageElement.textContent || '';
+
+        return detectAsciiTablePayload(text) || detectPipeTablePayload(text);
     }
 
     function detectTablePayload(messageElement) {
@@ -674,6 +763,18 @@
             .filter((line) => line.includes('|'))
             .map((line) => line.split('|').map((cell) => cell.trim()).filter((cell) => cell !== ''))
             .filter((cells) => cells.length >= 2 && !cells.every((cell) => /^:?-{3,}:?$/.test(cell)));
+
+        return payloadFromTableRows(rows);
+    }
+
+    function detectAsciiTablePayload(text) {
+        const rows = String(text || '')
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line.includes('|') && !/^\+[-+\s]+\+$/.test(line))
+            .map((line) => line.replace(/^\|?/, '').replace(/\|?$/, ''))
+            .map((line) => line.split('|').map((cell) => cell.trim()).filter((cell) => cell !== ''))
+            .filter((cells) => cells.length >= 2 && !cells.every((cell) => /^[-+\s]+$/.test(cell)));
 
         return payloadFromTableRows(rows);
     }
@@ -951,7 +1052,7 @@
         renderChartView(wrapper, payload, initialType);
     }
 
-    function renderChartView(wrapper, payload, type) {
+    function renderChartView(wrapper, payload, type, layoutAttempt = 0) {
         const selectedType = normalizeChartType(type);
         const canvas = wrapper.querySelector('.dynamic-chart-canvas');
         const tableContainer = wrapper.querySelector('.chart-table-container');
@@ -1003,6 +1104,13 @@
         tableContainer.style.display = 'none';
         tableContainer.innerHTML = '';
 
+        if (!hasRenderableChartWidth(canvas) && layoutAttempt < 10) {
+            window.requestAnimationFrame(() => {
+                renderChartView(wrapper, payload, selectedType, layoutAttempt + 1);
+            });
+            return;
+        }
+
         let revealTimer = null;
         const revealCanvas = () => {
             window.clearTimeout(revealTimer);
@@ -1033,6 +1141,18 @@
             downloadButton.disabled = true;
             downloadButton.setAttribute('aria-disabled', 'true');
         }
+    }
+
+    function hasRenderableChartWidth(canvas) {
+        const container = canvas.closest('.chart-canvas-container');
+        const wrapper = canvas.closest('.plugin-chart-wrapper');
+        const width = Math.max(
+            canvas.getBoundingClientRect().width,
+            container?.getBoundingClientRect().width || 0,
+            wrapper?.getBoundingClientRect().width || 0
+        );
+
+        return width >= 40;
     }
 
     function setChartLoading(wrapper, loading) {

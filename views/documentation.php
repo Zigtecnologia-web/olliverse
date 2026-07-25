@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Documentacao - Olliverse</title>
+    <link rel="icon" type="image/svg+xml" href="public/assets/img/favicon.svg">
     <link rel="stylesheet" href="public/assets/css/app.css">
 </head>
 <body class="documentation-body">
@@ -11,7 +12,13 @@
 <main class="documentation-shell">
     <header class="documentation-header">
         <div>
-            <span class="documentation-kicker">Olliverse</span>
+            <span class="olliverse-logo documentation-logo" aria-label="Olliverse">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" stroke="#00F576" stroke-width="2.5" stroke-dasharray="4 2"/>
+                    <circle cx="12" cy="12" r="4" fill="#00F576"/>
+                </svg>
+                <span class="olliverse-logo-word"><span class="olliverse-logo-olli">Olli</span>verse</span>
+            </span>
             <h1>Central de Documentacao</h1>
         </div>
         <a class="secondary-config-btn documentation-back-link" href="index.php<?php echo $returnChatId > 0 ? '?chat_id=' . (int) $returnChatId : ''; ?>">Voltar ao chat</a>

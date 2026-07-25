@@ -11,6 +11,8 @@ Regras para permitir a plotagem local pelo Olliverse:
 
 - Nao gere blocos `json-chart` como caminho principal.
 - Nao exiba JSON cru para criar graficos.
+- Nunca coloque a tabela dentro de bloco de codigo, incluindo `plaintext`.
+- Nunca use tabela ASCII desenhada com `+---+`; use apenas tabela Markdown com pipes.
 - Use tabelas Markdown com cabecalho, uma coluna de categoria e uma coluna numerica.
 - Prefira nomes de colunas claros, como `Categoria` e `Quantidade`, `Serie` e `Total`, `Aluno` e `Nota`, `Mes` e `Valor`.
 - Mantenha os numeros em formato legivel e consistente.

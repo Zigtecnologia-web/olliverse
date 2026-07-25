@@ -159,6 +159,12 @@ final class PluginManager
 
     private function dataAnalystRagSamplePrompt(): string
     {
+        $analyticsDataset = $this->dataAnalystAnalyticsPrompt();
+
+        if ($analyticsDataset !== '') {
+            return $analyticsDataset;
+        }
+
         $dataset = $_SESSION['olliverse_data_analyst_rag_sample'] ?? null;
 
         if (!is_array($dataset)) {
@@ -183,5 +189,44 @@ final class PluginManager
             . "Amostra recuperada:\n"
             . "```text\n{$sample}\n```"
         );
+    }
+
+    private function dataAnalystAnalyticsPrompt(): string
+    {
+        $dataset = $_SESSION['olliverse_data_analyst_dataset'] ?? null;
+
+        if (!is_array($dataset) || !is_array($dataset['datasets'] ?? null)) {
+            return '';
+        }
+
+        $lines = [
+            'Base de dados selecionada via camada analitica local:',
+            'Use SQL SELECT sobre as tabelas abaixo para estruturar agregacoes antes de responder.',
+            'Quando gerar graficos, prefira consultas que retornem categoria e valor numerico.',
+        ];
+
+        foreach ($dataset['datasets'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $columns = $item['columns'] ?? [];
+            $columnLabel = is_array($columns) ? implode(', ', array_map(
+                static fn (mixed $column): string => (string) $column,
+                $columns
+            )) : '';
+
+            $lines[] = sprintf(
+                '- Documento %d (%s): tabela `%s`, colunas: %s, linhas: %d, motor: %s',
+                (int) ($item['document_id'] ?? 0),
+                (string) ($item['source_name'] ?? ''),
+                (string) ($item['table_name'] ?? ''),
+                $columnLabel,
+                (int) ($item['row_count'] ?? 0),
+                (string) ($item['engine'] ?? 'local')
+            );
+        }
+
+        return trim(implode("\n", $lines));
     }
 }

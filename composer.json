@@ -12,5 +12,8 @@
         "php": ">=8.2",
         "dompdf/dompdf": "^3.1",
         "erusev/parsedown": "^1.8"
+    },
+    "suggest": {
+        "ext-pdo_duckdb": "Ativa o motor DuckDB real na camada analitica do workspace; sem a extensao, o app usa SQLite temporario como fallback."
     }
 }

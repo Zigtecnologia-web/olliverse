@@ -9,6 +9,8 @@ use App\Repositories\SqliteChatHistoryRepository;
 use App\Repositories\SqliteDocumentChunkRepository;
 use App\Repositories\SqliteConversationRepository;
 use App\Repositories\SqlitePersonaRepository;
+use App\Repositories\SqliteWorkspaceRepository;
+use App\Services\ChunkedUploadService;
 use App\Services\ContextWindowService;
 use App\Services\DocumentationService;
 use App\Services\ModelMetadataService;
@@ -17,9 +19,17 @@ use App\Services\OllamaClient;
 use App\Services\PluginManager;
 use App\Services\PdfExportService;
 use App\Services\PromptGeneratorService;
+use App\Services\RagChunkerService;
 use App\Services\RagIngestionService;
 use App\Services\RagRetrievalService;
+use App\Services\StructuredDataParser;
+use App\Services\VectorSimilarityService;
+use App\Services\WorkspaceAnalyticsService;
 use App\Support\IconSvg;
+
+if (isJsonUploadRequest()) {
+    beginJsonUploadGuard();
+}
 
 $app = require __DIR__ . '/bootstrap/app.php';
 
@@ -33,16 +43,45 @@ $contextWindowService = $app['context_window'];
 $modelMetadataService = $app['model_metadata_service'];
 /** @var PromptGeneratorService $promptGeneratorService */
 $promptGeneratorService = $app['prompt_generator_service'];
-/** @var SqliteDocumentChunkRepository $documentChunkRepository */
-$documentChunkRepository = $app['document_chunk_repository'];
-/** @var RagIngestionService $ragIngestionService */
-$ragIngestionService = $app['rag_ingestion_service'];
-/** @var RagRetrievalService $ragRetrievalService */
-$ragRetrievalService = $app['rag_retrieval_service'];
 /** @var PluginManager $pluginManager */
 $pluginManager = $app['plugin_manager'];
 /** @var \PDO $pdo */
 $pdo = $app['pdo'];
+
+$workspaceRepository = new SqliteWorkspaceRepository($pdo);
+$requestedWorkspaceId = (int) ($_POST['workspace_id'] ?? $_GET['workspace_id'] ?? 0);
+$chatWorkspaceId = workspaceIdForChat($pdo, (int) ($_GET['chat_id'] ?? $_POST['chat_id'] ?? 0));
+
+if ($requestedWorkspaceId > 0 && $workspaceRepository->find($requestedWorkspaceId) !== null) {
+    $_SESSION['olliverse_workspace_id'] = $requestedWorkspaceId;
+} elseif ($chatWorkspaceId !== null) {
+    $_SESSION['olliverse_workspace_id'] = $chatWorkspaceId;
+}
+
+$activeWorkspace = $workspaceRepository->find((int) ($_SESSION['olliverse_workspace_id'] ?? 0))
+    ?? $workspaceRepository->default();
+$activeWorkspaceId = (int) $activeWorkspace['id'];
+$_SESSION['olliverse_workspace_id'] = $activeWorkspaceId;
+$documentChunkRepository = new SqliteDocumentChunkRepository($pdo, new VectorSimilarityService(), $activeWorkspaceId);
+$ragIngestionService = new RagIngestionService(
+    $documentChunkRepository,
+    new RagChunkerService(),
+    $contextWindowService,
+    $ollamaClient,
+    $config->ragEmbeddingModel
+);
+$ragRetrievalService = new RagRetrievalService(
+    $documentChunkRepository,
+    $ollamaClient,
+    $config->ragEmbeddingModel
+);
+$workspaceAnalyticsService = new WorkspaceAnalyticsService(
+    $pdo,
+    new StructuredDataParser(),
+    $activeWorkspaceId,
+    __DIR__ . '/storage/analytics'
+);
+$chunkedUploadService = new ChunkedUploadService(__DIR__ . '/storage/chunk_uploads');
 
 if (($_GET['view'] ?? '') === 'docs') {
     $documentationMode = ($_GET['doc'] ?? 'produto') === 'tecnico' ? 'tecnico' : 'produto';
@@ -58,7 +97,73 @@ if (($_GET['view'] ?? '') === 'docs') {
 $availableModels = $ollamaClient->listModels();
 $defaultModel = ModelSelector::defaultModel($availableModels, $config->preferredModels);
 $personaRepository = new SqlitePersonaRepository($pdo, $config->defaultSystemPrompt);
-$chatHistoryRepository = new SqliteChatHistoryRepository($pdo);
+$chatHistoryRepository = new SqliteChatHistoryRepository($pdo, $activeWorkspaceId);
+
+if (($_GET['action'] ?? '') === 'workspaces') {
+    jsonResponse([
+        'success' => true,
+        'workspaces' => $workspaceRepository->all(),
+        'active_workspace' => $activeWorkspace,
+    ]);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'workspace_create') {
+    try {
+        $workspace = $workspaceRepository->create(
+            (string) ($_POST['name'] ?? ''),
+            (string) ($_POST['icon'] ?? '')
+        );
+        $_SESSION['olliverse_workspace_id'] = (int) $workspace['id'];
+        $workspaceDocumentRepository = new SqliteDocumentChunkRepository($pdo, new VectorSimilarityService(), (int) $workspace['id']);
+        $payload = workspacePayload(
+            $pdo,
+            $contextWindowService,
+            $personaRepository,
+            $workspaceDocumentRepository,
+            $workspaceRepository,
+            $workspace,
+            $defaultModel,
+            $config->defaultSystemPrompt
+        );
+
+        jsonResponse($payload);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'workspace_select') {
+    try {
+        $workspace = $workspaceRepository->find((int) ($_POST['workspace_id'] ?? 0));
+
+        if ($workspace === null) {
+            throw new RuntimeException('Workspace nao encontrado.');
+        }
+
+        $_SESSION['olliverse_workspace_id'] = (int) $workspace['id'];
+        $workspaceDocumentRepository = new SqliteDocumentChunkRepository($pdo, new VectorSimilarityService(), (int) $workspace['id']);
+        $payload = workspacePayload(
+            $pdo,
+            $contextWindowService,
+            $personaRepository,
+            $workspaceDocumentRepository,
+            $workspaceRepository,
+            $workspace,
+            $defaultModel,
+            $config->defaultSystemPrompt
+        );
+
+        jsonResponse($payload);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
 
 if (($_GET['action'] ?? '') === 'history') {
     jsonResponse([
@@ -85,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'update
         $selectedModel = trim((string) ($_POST['model'] ?? $defaultModel));
         $postedTitle = trim((string) ($_POST['title'] ?? ''));
 
-        if ($titleChatId <= 0 || !SqliteConversationRepository::exists($pdo, $titleChatId)) {
+        if ($titleChatId <= 0 || !SqliteConversationRepository::existsInWorkspace($pdo, $titleChatId, $activeWorkspaceId)) {
             throw new RuntimeException('Conversa não encontrada para atualizar o título.');
         }
 
@@ -184,7 +289,7 @@ if (($_GET['action'] ?? '') === 'export_pdf') {
 if (($_GET['action'] ?? '') === 'chat_data') {
     $requestedChatId = (int) ($_GET['chat_id'] ?? 0);
 
-    if ($requestedChatId <= 0 || !SqliteConversationRepository::exists($pdo, $requestedChatId)) {
+    if ($requestedChatId <= 0 || !SqliteConversationRepository::existsInWorkspace($pdo, $requestedChatId, $activeWorkspaceId)) {
         jsonResponse([
             'success' => false,
             'error' => 'Conversa não encontrada.',
@@ -226,7 +331,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'new_ch
             $pdo,
             $selectedModel,
             (string) $activePersona['prompt_content'],
-            (int) $activePersona['id']
+            (int) $activePersona['id'],
+            $activeWorkspaceId
         );
 
         jsonResponse([
@@ -291,21 +397,65 @@ if (in_array(($_GET['action'] ?? ''), ['rag_documents', 'rag_documents_list'], t
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_ingest') {
     try {
         $upload = uploadedRagFile();
-        $result = $ragIngestionService->ingest(
+        $payload = ingestUploadedDocument(
+            $ragIngestionService,
+            $workspaceAnalyticsService,
             (string) $upload['name'],
             (string) $upload['content']
         );
 
-        jsonResponse([
-            'success' => true,
-            'document' => $result,
-            'documents' => $documentChunkRepository->sources(),
-        ]);
+        jsonResponse($payload + ['documents' => $documentChunkRepository->sources()]);
     } catch (Throwable $error) {
+        clearJsonUploadGuard();
+
         jsonResponse([
             'success' => false,
             'error' => $error->getMessage(),
-        ], 422);
+        ], $error instanceof InvalidArgumentException ? 400 : 500);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_chunk_upload') {
+    $chunk = null;
+
+    try {
+        $chunk = $chunkedUploadService->receive($_FILES, $_POST);
+
+        if (!$chunk['complete']) {
+            jsonResponse([
+                'success' => true,
+                'complete' => false,
+                'received' => $chunk['received'],
+                'total' => $chunk['total'],
+            ]);
+        }
+
+        $payload = ingestChunkedCsvDocument(
+            $ragIngestionService,
+            $workspaceAnalyticsService,
+            new StructuredDataParser(),
+            (string) $chunk['name'],
+            (string) $chunk['path']
+        );
+        $chunkedUploadService->cleanup((string) $chunk['path']);
+
+        jsonResponse($payload + [
+            'complete' => true,
+            'received' => $chunk['received'],
+            'total' => $chunk['total'],
+            'documents' => $documentChunkRepository->sources(),
+        ]);
+    } catch (Throwable $error) {
+        clearJsonUploadGuard();
+
+        if (is_array($chunk) && ($chunk['complete'] ?? false) && is_string($chunk['path'] ?? null)) {
+            $chunkedUploadService->cleanup((string) $chunk['path']);
+        }
+
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], $error instanceof InvalidArgumentException ? 400 : 500);
     }
 }
 
@@ -316,6 +466,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array(($_GET['action'] ?? ''), [
         if (!$deleted) {
             throw new RuntimeException('Documento não encontrado para exclusão.');
         }
+
+        $workspaceAnalyticsService->deleteDocumentDataset((int) ($_POST['document_id'] ?? 0));
 
         jsonResponse([
             'success' => true,
@@ -363,16 +515,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'data_i
         }
 
         $ragDocumentIds = selectedRagDocumentIds();
+        $analyticsDatasets = $workspaceAnalyticsService->datasets($ragDocumentIds);
 
         if ($ragDocumentIds === []) {
             unset($_SESSION['olliverse_data_analyst_rag_sample']);
+            unset($_SESSION['olliverse_data_analyst_dataset']);
             throw new RuntimeException('Selecione pelo menos um documento com conteúdo preparado.');
+        }
+
+        if ($analyticsDatasets !== []) {
+            $inspectionPrompt = dataInsightAnalyticsInspectionPrompt($analyticsDatasets);
+            $rawInspection = $ollamaClient->generate($selectedModel, $inspectionPrompt);
+            $inspection = normalizeDataInsights($rawInspection, true);
+            $_SESSION['olliverse_data_analyst_dataset'] = [
+                'datasets' => array_map(static fn (array $dataset): array => [
+                    'document_id' => $dataset['document_id'],
+                    'source_name' => $dataset['source_name'],
+                    'table_name' => $dataset['table_name'],
+                    'columns' => $dataset['columns'],
+                    'row_count' => $dataset['row_count'],
+                    'engine' => $dataset['engine'],
+                ], $analyticsDatasets),
+            ];
+            unset($_SESSION['olliverse_data_analyst_rag_sample']);
+
+            jsonResponse([
+                'success' => true,
+                'sources' => array_map(static fn (array $dataset): string => $dataset['source_name'], $analyticsDatasets),
+                'engine' => $analyticsDatasets[0]['engine'] ?? 'sqlite-fallback',
+                'inspection' => $inspection,
+                'datasets' => $analyticsDatasets,
+            ]);
         }
 
         $sampleChunks = $documentChunkRepository->sampleChunks(8, $ragDocumentIds);
 
         if ($sampleChunks === []) {
             unset($_SESSION['olliverse_data_analyst_rag_sample']);
+            unset($_SESSION['olliverse_data_analyst_dataset']);
             throw new RuntimeException('O documento selecionado não tem conteúdo preparado.');
         }
 
@@ -402,6 +582,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'data_i
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'data_query') {
+    try {
+        if (!$pluginManager->isActive('data_analyst')) {
+            throw new RuntimeException('Ative o plugin de Análise de Dados antes de consultar dados.');
+        }
+
+        $payload = $workspaceAnalyticsService->chartPayload(
+            (int) ($_POST['document_id'] ?? 0),
+            (string) ($_POST['sql'] ?? ''),
+            (string) ($_POST['chart_type'] ?? 'bar'),
+            (string) ($_POST['title'] ?? '')
+        );
+
+        jsonResponse([
+            'success' => true,
+            'payload' => $payload,
+        ]);
+    } catch (Throwable $error) {
+        jsonResponse([
+            'success' => false,
+            'error' => $error->getMessage(),
+        ], 422);
+    }
+}
+
 if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
     $currentChatId = (int) ($_GET['chat_id'] ?? 0);
     $activePersona = $personaRepository->activeForChat($currentChatId);
@@ -410,20 +615,22 @@ if (isset($_GET['new']) || (isset($_GET['clear']) && $_GET['clear'] === '1')) {
         $pdo,
         $defaultModel,
         (string) $activePersona['prompt_content'],
-        (int) $activePersona['id']
+        (int) $activePersona['id'],
+        $activeWorkspaceId
     ));
 }
 
 $chatId = (int) ($_GET['chat_id'] ?? 0);
 
-if ($chatId <= 0 || !SqliteConversationRepository::exists($pdo, $chatId)) {
+if ($chatId <= 0 || !SqliteConversationRepository::existsInWorkspace($pdo, $chatId, $activeWorkspaceId)) {
     $activePersona = $personaRepository->activeForChat(0);
 
     redirectToChat(SqliteConversationRepository::createChat(
         $pdo,
         $defaultModel,
         (string) $activePersona['prompt_content'],
-        (int) $activePersona['id']
+        (int) $activePersona['id'],
+        $activeWorkspaceId
     ));
 }
 
@@ -439,7 +646,8 @@ $chatStreamHandler = new ChatStreamHandler(
     $conversationRepository,
     $contextWindowService,
     $ragRetrievalService,
-    $pluginManager
+    $pluginManager,
+    $workspaceAnalyticsService
 );
 $systemPrompt = $conversationRepository->systemPrompt($config->defaultSystemPrompt);
 $personas = $personaRepository->all();
@@ -556,10 +764,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_co
             3,
             $ragDocumentIds
         );
+        $analyticsContext = $workspaceAnalyticsService->chatContext(
+            $prompt,
+            trim((string) ($_POST['model'] ?? $defaultModel)),
+            $ollamaClient,
+            $ragDocumentIds
+        );
+        $augmentedSystemPrompt = $ragRetrievalService->augmentSystemPrompt($systemPrompt, $ragChunks);
+        $augmentedSystemPrompt = $workspaceAnalyticsService->augmentSystemPromptWithAnalytics($augmentedSystemPrompt, $analyticsContext);
 
         jsonResponse([
             'success' => true,
-            'system_prompt' => $ragRetrievalService->augmentSystemPrompt($systemPrompt, $ragChunks),
+            'system_prompt' => $augmentedSystemPrompt,
             'sources' => $ragRetrievalService->metadata($ragChunks),
         ]);
     } catch (Throwable $error) {
@@ -575,6 +791,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'web_ai
         $prompt = trim((string) ($_POST['prompt'] ?? ''));
         $assistantResponse = trim((string) ($_POST['assistant_response'] ?? ''));
         $webAiModel = trim((string) ($_POST['web_ai_model'] ?? 'web_ai'));
+        $responseDurationMs = isset($_POST['response_duration_ms']) && is_numeric($_POST['response_duration_ms'])
+            ? max(0, (int) round((float) $_POST['response_duration_ms']))
+            : null;
 
         if ($prompt === '' || $assistantResponse === '') {
             throw new RuntimeException('Mensagem Web AI incompleta para persistencia.');
@@ -588,6 +807,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'web_ai
         $messages[] = [
             'role' => 'assistant',
             'content' => $assistantResponse,
+            'response_duration_ms' => $responseDurationMs,
         ];
 
         $contextWasTrimmed = $conversationRepository->replaceConversation(
@@ -631,6 +851,7 @@ $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja p
 $initialMessages = $conversationRepository->messages();
 $initialRagDocuments = $documentChunkRepository->sources();
 $initialChatHistory = $chatHistoryRepository->all();
+$initialWorkspaces = $workspaceRepository->all();
 $availablePlugins = $pluginManager->all();
 $activePlugins = $pluginManager->activePlugins();
 $initialContextUsage = $contextWindowService->usage(
@@ -643,6 +864,76 @@ function redirectToChat(int $chatId): never
 
     header('Location: ' . $baseUri . '?chat_id=' . $chatId);
     exit;
+}
+
+function workspaceIdForChat(PDO $pdo, int $chatId): ?int
+{
+    if ($chatId <= 0) {
+        return null;
+    }
+
+    $statement = $pdo->prepare('SELECT workspace_id FROM chats WHERE id = :id LIMIT 1');
+    $statement->execute(['id' => $chatId]);
+    $workspaceId = $statement->fetchColumn();
+
+    return $workspaceId === false ? null : (int) $workspaceId;
+}
+
+/**
+ * @param array{id: int, name: string, icon: string, created_at: string} $workspace
+ * @return array<string, mixed>
+ */
+function workspacePayload(
+    PDO $pdo,
+    ContextWindowService $contextWindowService,
+    SqlitePersonaRepository $personaRepository,
+    SqliteDocumentChunkRepository $documentChunkRepository,
+    SqliteWorkspaceRepository $workspaceRepository,
+    array $workspace,
+    string $defaultModel,
+    string $defaultSystemPrompt
+): array {
+    $workspaceId = (int) $workspace['id'];
+    $historyRepository = new SqliteChatHistoryRepository($pdo, $workspaceId);
+    $chats = $historyRepository->all();
+    $chatId = (int) ($chats[0]['id'] ?? 0);
+
+    if ($chatId <= 0) {
+        $activePersona = $personaRepository->activeForChat(0);
+        $chatId = SqliteConversationRepository::createChat(
+            $pdo,
+            $defaultModel,
+            (string) $activePersona['prompt_content'],
+            (int) $activePersona['id'],
+            $workspaceId
+        );
+        $chats = $historyRepository->all();
+    }
+
+    $conversationRepository = new SqliteConversationRepository(
+        $pdo,
+        $contextWindowService,
+        $chatId,
+        $defaultModel
+    );
+    $systemPrompt = $conversationRepository->systemPrompt($defaultSystemPrompt);
+    $messages = $conversationRepository->messages();
+    $activePersona = $personaRepository->activeForChat($chatId);
+
+    return [
+        'success' => true,
+        'workspaces' => $workspaceRepository->all(),
+        'active_workspace' => $workspace,
+        'chat' => $historyRepository->find($chatId),
+        'chat_id' => $chatId,
+        'messages' => $messages,
+        'active_persona' => $activePersona,
+        'documents' => $documentChunkRepository->sources(),
+        'chats' => $chats,
+        'context_usage' => $contextWindowService->usage(
+            $contextWindowService->withSystemPrompt($systemPrompt, $messages)
+        ),
+    ];
 }
 
 function iconeEnviar(): string
@@ -660,10 +951,77 @@ function iconSvg(string $name): string
  */
 function jsonResponse(array $payload, int $status = 200): never
 {
+    clearJsonUploadGuard();
     http_response_code($status);
     header('Content-Type: application/json; charset=UTF-8');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+function isJsonUploadRequest(): bool
+{
+    $action = $_GET['action'] ?? '';
+
+    return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'
+        && in_array($action, ['rag_ingest', 'rag_chunk_upload'], true);
+}
+
+function beginJsonUploadGuard(): void
+{
+    if (($GLOBALS['olliverse_json_upload_guard'] ?? false) === true) {
+        return;
+    }
+
+    $GLOBALS['olliverse_json_upload_guard'] = true;
+    $GLOBALS['olliverse_json_upload_display_errors'] = ini_get('display_errors');
+    header('Content-Type: application/json; charset=UTF-8');
+    ini_set('display_errors', '0');
+    ob_start();
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        if ((error_reporting() & $severity) === 0) {
+            return false;
+        }
+
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    register_shutdown_function(static function (): void {
+        if (($GLOBALS['olliverse_json_upload_guard'] ?? false) !== true) {
+            return;
+        }
+
+        $error = error_get_last();
+        $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+
+        if (!is_array($error) || !in_array((int) ($error['type'] ?? 0), $fatalTypes, true)) {
+            return;
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        http_response_code(500);
+        header('Content-Type: application/json; charset=UTF-8');
+        echo json_encode([
+            'success' => false,
+            'error' => 'Falha interna ao processar o arquivo.',
+        ], JSON_UNESCAPED_UNICODE);
+    });
+}
+
+function clearJsonUploadGuard(): void
+{
+    if (($GLOBALS['olliverse_json_upload_guard'] ?? false) !== true) {
+        return;
+    }
+
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+
+    restore_error_handler();
+    ini_set('display_errors', (string) ($GLOBALS['olliverse_json_upload_display_errors'] ?? ''));
+    $GLOBALS['olliverse_json_upload_guard'] = false;
 }
 
 /**
@@ -747,6 +1105,63 @@ function shortenPlainText(string $content, int $limit): string
 }
 
 /**
+ * @return array{success: bool, document: array{id: int, source_name: string, chunks: int}, analytics_dataset: array{id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, engine: string}|null}
+ */
+function ingestUploadedDocument(
+    RagIngestionService $ragIngestionService,
+    WorkspaceAnalyticsService $workspaceAnalyticsService,
+    string $sourceName,
+    string $content
+): array {
+    $result = $ragIngestionService->ingest($sourceName, $content);
+    $analyticsDataset = $workspaceAnalyticsService->registerDocument(
+        (int) $result['id'],
+        $sourceName,
+        $content
+    );
+
+    return [
+        'success' => true,
+        'document' => $result,
+        'analytics_dataset' => $analyticsDataset,
+    ];
+}
+
+/**
+ * @return array{success: bool, document: array{id: int, source_name: string, chunks: int}, analytics_dataset: array{id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, engine: string}}
+ */
+function ingestChunkedCsvDocument(
+    RagIngestionService $ragIngestionService,
+    WorkspaceAnalyticsService $workspaceAnalyticsService,
+    StructuredDataParser $parser,
+    string $sourceName,
+    string $filePath
+): array {
+    $dataset = $parser->parseFile($sourceName, $filePath);
+
+    if ($dataset === null) {
+        throw new InvalidArgumentException('CSV sem cabeçalho válido ou sem linhas aproveitáveis.');
+    }
+
+    $result = $ragIngestionService->ingest($sourceName, $dataset['sample']);
+    $analyticsDataset = $workspaceAnalyticsService->registerDataset(
+        (int) $result['id'],
+        $sourceName,
+        $dataset
+    );
+
+    if ($analyticsDataset === null) {
+        throw new RuntimeException('Não foi possível preparar a tabela analítica do CSV.');
+    }
+
+    return [
+        'success' => true,
+        'document' => $result,
+        'analytics_dataset' => $analyticsDataset,
+    ];
+}
+
+/**
  * @return array{name: string, content: string}
  */
 function uploadedRagFile(): array
@@ -754,13 +1169,13 @@ function uploadedRagFile(): array
     $file = $_FILES['document'] ?? null;
 
     if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Envie um arquivo de texto para adicionar.');
+        throw new InvalidArgumentException('Envie um arquivo de texto para adicionar.');
     }
 
     $size = (int) ($file['size'] ?? 0);
 
     if ($size <= 0 || $size > 2 * 1024 * 1024) {
-        throw new RuntimeException('O arquivo precisa ter até 2 MB.');
+        throw new InvalidArgumentException('O arquivo precisa ter até 2 MB.');
     }
 
     $tmpName = (string) ($file['tmp_name'] ?? '');
@@ -772,11 +1187,11 @@ function uploadedRagFile(): array
     $content = file_get_contents($tmpName);
 
     if (!is_string($content) || trim($content) === '') {
-        throw new RuntimeException('Não foi possível ler texto do arquivo.');
+        throw new InvalidArgumentException('Não foi possível ler texto do arquivo.');
     }
 
     if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $content) === 1) {
-        throw new RuntimeException('Por enquanto, o RAG aceita apenas arquivos de texto.');
+        throw new InvalidArgumentException('Por enquanto, o RAG aceita apenas arquivos de texto.');
     }
 
     return [
@@ -832,9 +1247,35 @@ function dataInsightInspectionPrompt(array $sourceNames, string $sample): string
 }
 
 /**
- * @return array{summary: string, suggestions: array<int, array{title: string, query: string, chart_type: string}>}
+ * @param array<int, array{document_id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, sample: string, engine: string}> $datasets
  */
-function normalizeDataInsights(string $rawInspection): array
+function dataInsightAnalyticsInspectionPrompt(array $datasets): string
+{
+    $promptPath = __DIR__ . '/plugins/data_analyst/includes/inspect_prompt.php';
+    $basePrompt = is_file($promptPath) ? require $promptPath : '';
+    $blocks = array_map(static function (array $dataset): string {
+        return implode("\n", [
+            'Documento: ' . $dataset['source_name'],
+            'document_id: ' . $dataset['document_id'],
+            'table_name: ' . $dataset['table_name'],
+            'engine: ' . $dataset['engine'],
+            'row_count: ' . $dataset['row_count'],
+            'columns: ' . implode(', ', $dataset['columns']),
+            $dataset['sample'],
+        ]);
+    }, $datasets);
+
+    return trim((string) $basePrompt) . "\n\n"
+        . "Use a camada analitica local para consultar estas tabelas antes de responder.\n"
+        . "Cada sugestao deve trazer SQL SELECT valido no campo sql, usando exatamente o table_name informado.\n"
+        . "A query deve retornar uma coluna de categoria e uma coluna numerica agregada, ja ordenadas quando fizer sentido.\n\n"
+        . implode("\n\n---\n\n", $blocks);
+}
+
+/**
+ * @return array{summary: string, suggestions: array<int, array<string, string|int>>}
+ */
+function normalizeDataInsights(string $rawInspection, bool $allowSql = false): array
 {
     $json = extractJsonObject($rawInspection);
     $payload = json_decode($json, true);
@@ -860,16 +1301,25 @@ function normalizeDataInsights(string $rawInspection): array
         $title = trim((string) ($suggestion['title'] ?? ''));
         $query = trim((string) ($suggestion['query'] ?? ''));
         $chartType = trim((string) ($suggestion['chart_type'] ?? 'bar'));
+        $sql = trim((string) ($suggestion['sql'] ?? ''));
+        $documentId = (int) ($suggestion['document_id'] ?? 0);
 
         if ($title === '' || $query === '' || !in_array($chartType, ['bar', 'pie', 'line'], true)) {
             continue;
         }
 
-        $normalizedSuggestions[] = [
+        $normalizedSuggestion = [
             'title' => $title,
             'query' => $query,
             'chart_type' => $chartType,
         ];
+
+        if ($allowSql && $sql !== '' && $documentId > 0) {
+            $normalizedSuggestion['sql'] = $sql;
+            $normalizedSuggestion['document_id'] = $documentId;
+        }
+
+        $normalizedSuggestions[] = $normalizedSuggestion;
     }
 
     if ($normalizedSuggestions === []) {

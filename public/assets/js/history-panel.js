@@ -1,4 +1,5 @@
 function initHistoryPanel() {
+    initWorkspaceSwitcher();
     renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
     updateExportLink();
     setHistoryOpen(Boolean(window.OlliverseState.historyOpen));
@@ -43,7 +44,230 @@ function initHistoryPanel() {
         if (!event.target.closest('.export-menu')) {
             closeExportMenu();
         }
+
+        if (!event.target.closest('.workspace-switcher')) {
+            closeWorkspaceMenu();
+        }
     });
+}
+
+function initWorkspaceSwitcher() {
+    renderWorkspaceOptions();
+
+    const menuButton = document.getElementById('workspaceMenuBtn');
+    const createToggle = document.getElementById('newWorkspaceToggleBtn');
+    const createForm = document.getElementById('workspaceCreateForm');
+
+    menuButton?.addEventListener('click', function(event) {
+        event.stopPropagation();
+        toggleWorkspaceMenu();
+    });
+
+    createToggle?.addEventListener('click', function() {
+        const shouldOpen = createForm.hidden;
+
+        createForm.hidden = !shouldOpen;
+        if (shouldOpen) {
+            document.getElementById('workspaceNameInput')?.focus();
+        }
+    });
+
+    createForm?.addEventListener('submit', function(event) {
+        event.preventDefault();
+        createWorkspace();
+    });
+}
+
+function renderWorkspaceOptions() {
+    const container = document.getElementById('workspaceOptions');
+    const workspaces = window.OlliverseConfig.initialWorkspaces || [];
+    const activeWorkspaceId = Number(window.OlliverseConfig.activeWorkspace?.id || 0);
+
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
+    workspaces.forEach((workspace) => {
+        const button = document.createElement('button');
+        const icon = document.createElement('span');
+        const name = document.createElement('span');
+        const workspaceId = Number(workspace.id || 0);
+
+        button.type = 'button';
+        button.className = 'workspace-option';
+        button.classList.toggle('active', workspaceId === activeWorkspaceId);
+        button.setAttribute('role', 'menuitem');
+        button.disabled = window.OlliverseState.workspaceSwitching || workspaceId === activeWorkspaceId;
+        icon.className = 'workspace-option-icon';
+        icon.textContent = workspace.icon || '#';
+        name.className = 'workspace-option-name';
+        name.textContent = workspace.name || 'Workspace';
+        button.appendChild(icon);
+        button.appendChild(name);
+        button.addEventListener('click', function() {
+            selectWorkspace(workspaceId);
+        });
+        container.appendChild(button);
+    });
+
+    updateActiveWorkspaceLabel();
+}
+
+function updateActiveWorkspaceLabel() {
+    const workspace = window.OlliverseConfig.activeWorkspace || {};
+    const icon = document.getElementById('activeWorkspaceIcon');
+    const name = document.getElementById('activeWorkspaceName');
+
+    if (icon) {
+        icon.textContent = workspace.icon || '#';
+    }
+
+    if (name) {
+        name.textContent = workspace.name || 'Workspace';
+    }
+}
+
+function toggleWorkspaceMenu() {
+    const switcher = document.getElementById('workspaceSwitcher');
+    const button = document.getElementById('workspaceMenuBtn');
+    const shouldOpen = !switcher.classList.contains('open');
+
+    switcher.classList.toggle('open', shouldOpen);
+    button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+}
+
+function closeWorkspaceMenu() {
+    const switcher = document.getElementById('workspaceSwitcher');
+    const button = document.getElementById('workspaceMenuBtn');
+
+    if (!switcher || !button) {
+        return;
+    }
+
+    switcher.classList.remove('open');
+    button.setAttribute('aria-expanded', 'false');
+}
+
+function createWorkspace() {
+    const nameInput = document.getElementById('workspaceNameInput');
+    const iconInput = document.getElementById('workspaceIconInput');
+    const name = String(nameInput?.value || '').trim();
+
+    if (!name) {
+        setWorkspaceStatus('Informe um nome para o workspace.', true);
+        nameInput?.focus();
+        return;
+    }
+
+    postWorkspaceAction('workspace_create', new URLSearchParams({
+        name,
+        icon: String(iconInput?.value || '').trim(),
+    }));
+}
+
+function selectWorkspace(workspaceId) {
+    if (!workspaceId || workspaceId === Number(window.OlliverseConfig.activeWorkspace?.id || 0)) {
+        return;
+    }
+
+    postWorkspaceAction('workspace_select', new URLSearchParams({
+        workspace_id: String(workspaceId),
+    }));
+}
+
+function postWorkspaceAction(action, body) {
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('action', action);
+
+    window.OlliverseState.workspaceSwitching = true;
+    setWorkspaceStatus(action === 'workspace_create' ? 'Criando workspace...' : 'Trocando workspace...');
+    setWorkspaceControlsDisabled(true);
+
+    fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+        },
+        body: body.toString(),
+    })
+    .then((response) => response.json().then((payload) => {
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.error || 'Nao foi possivel atualizar o workspace.');
+        }
+
+        return payload;
+    }))
+    .then((payload) => {
+        applyWorkspacePayload(payload);
+        closeWorkspaceMenu();
+        setWorkspaceStatus('');
+    })
+    .catch((error) => {
+        setWorkspaceStatus(error.message || 'Erro ao atualizar workspace.', true);
+    })
+    .finally(() => {
+        window.OlliverseState.workspaceSwitching = false;
+        setWorkspaceControlsDisabled(false);
+        renderWorkspaceOptions();
+    });
+}
+
+function applyWorkspacePayload(payload) {
+    const chatId = Number(payload.chat_id || payload.chat?.id || 0);
+
+    window.OlliverseConfig.initialWorkspaces = payload.workspaces || window.OlliverseConfig.initialWorkspaces || [];
+    window.OlliverseConfig.activeWorkspace = payload.active_workspace || window.OlliverseConfig.activeWorkspace;
+    window.OlliverseConfig.initialChatHistory = payload.chats || [];
+    window.OlliverseConfig.initialRagDocuments = payload.documents || [];
+    window.OlliverseConfig.chatId = chatId;
+    window.OlliverseConfig.activePersona = payload.active_persona || window.OlliverseConfig.activePersona;
+    window.OlliverseConfig.initialMessages = payload.messages || [];
+    window.OlliverseConfig.systemPrompt = String(window.OlliverseConfig.activePersona?.prompt_content || window.OlliverseConfig.systemPrompt || '');
+    window.OlliverseState.historySearchResults = null;
+    window.OlliverseState.historySearchChatIds = null;
+    window.OlliverseState.historySearchQuery = '';
+
+    const searchInput = document.getElementById('historySearchInput');
+    if (searchInput) {
+        searchInput.value = '';
+    }
+
+    renderLoadedChatMessages(payload.messages || []);
+    updateContextUsage(payload.context_usage);
+    renderPersonaSelect();
+    fillPersonaForm(Number(window.OlliverseConfig.activePersona?.id || 0));
+    renderRagDocuments(payload.documents || []);
+    renderRagManagerDocuments(payload.documents || []);
+    renderHistoryList(window.OlliverseConfig.initialChatHistory || []);
+    updateExportLink();
+    updateActiveWorkspaceLabel();
+
+    if (chatId > 0) {
+        window.history.pushState({}, '', `${window.location.pathname}?chat_id=${chatId}`);
+    }
+}
+
+function setWorkspaceControlsDisabled(disabled) {
+    document
+        .querySelectorAll('#workspaceMenuBtn, .workspace-option, #newWorkspaceToggleBtn, #workspaceCreateForm input, #workspaceCreateForm button')
+        .forEach((control) => {
+            control.disabled = disabled;
+        });
+}
+
+function setWorkspaceStatus(message, isError = false) {
+    const status = document.getElementById('workspaceStatus');
+
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.classList.toggle('error', isError);
 }
 
 function setHistoryOpen(isOpen) {
@@ -581,7 +805,12 @@ function renderLoadedChatMessages(messages) {
 
     messages.forEach((message) => {
         const role = message.role === 'user' ? 'user' : 'assistant';
-        appendMessage(message.content || '', role, role === 'assistant');
+        appendMessage(
+            message.content || '',
+            role,
+            role === 'assistant',
+            role === 'assistant' ? message.response_duration_ms : null
+        );
     });
 
     scrollToBottom();

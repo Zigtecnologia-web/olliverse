@@ -12,6 +12,7 @@ final readonly class SqliteDocumentChunkRepository
     public function __construct(
         private PDO $pdo,
         private VectorSimilarityService $similarityService,
+        private int $workspaceId = 1,
     ) {
     }
 
@@ -67,7 +68,7 @@ final readonly class SqliteDocumentChunkRepository
      */
     public function sources(): array
     {
-        $statement = $this->pdo->query(
+        $statement = $this->pdo->prepare(
             'SELECT rag_documents.id,
                     rag_documents.source_name,
                     COUNT(document_chunks.id) AS chunks,
@@ -75,9 +76,11 @@ final readonly class SqliteDocumentChunkRepository
                     COALESCE(SUM(LENGTH(document_chunks.content) + LENGTH(document_chunks.embedding_json)), 0) AS estimated_bytes
              FROM rag_documents
              LEFT JOIN document_chunks ON document_chunks.document_id = rag_documents.id
+             WHERE rag_documents.workspace_id = :workspace_id
              GROUP BY rag_documents.id, rag_documents.source_name, rag_documents.created_at
              ORDER BY rag_documents.created_at DESC, rag_documents.source_name ASC'
         );
+        $statement->execute(['workspace_id' => $this->workspaceId]);
 
         return array_map(
             static fn (array $source): array => [
@@ -100,11 +103,25 @@ final readonly class SqliteDocumentChunkRepository
         $this->pdo->beginTransaction();
 
         try {
-            $statement = $this->pdo->prepare('DELETE FROM document_chunks WHERE document_id = :document_id');
-            $statement->execute(['document_id' => $documentId]);
+            $statement = $this->pdo->prepare(
+                'DELETE FROM document_chunks
+                 WHERE document_id = :document_id
+                    AND EXISTS (
+                        SELECT 1 FROM rag_documents
+                        WHERE rag_documents.id = document_chunks.document_id
+                            AND rag_documents.workspace_id = :workspace_id
+                    )'
+            );
+            $statement->execute([
+                'document_id' => $documentId,
+                'workspace_id' => $this->workspaceId,
+            ]);
 
-            $statement = $this->pdo->prepare('DELETE FROM rag_documents WHERE id = :id');
-            $statement->execute(['id' => $documentId]);
+            $statement = $this->pdo->prepare('DELETE FROM rag_documents WHERE id = :id AND workspace_id = :workspace_id');
+            $statement->execute([
+                'id' => $documentId,
+                'workspace_id' => $this->workspaceId,
+            ]);
             $deleted = $statement->rowCount() > 0;
 
             $this->pdo->commit();
@@ -127,8 +144,12 @@ final readonly class SqliteDocumentChunkRepository
     public function topSimilarChunks(array $queryEmbedding, int $limit = 3, array $documentIds = []): array
     {
         $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
-        $sql = 'SELECT id, document_id, source_name, content, embedding_json FROM document_chunks WHERE document_id IS NOT NULL';
-        $params = [];
+        $sql = 'SELECT document_chunks.id, document_chunks.document_id, document_chunks.source_name, document_chunks.content, document_chunks.embedding_json
+                FROM document_chunks
+                INNER JOIN rag_documents ON rag_documents.id = document_chunks.document_id
+                WHERE document_chunks.document_id IS NOT NULL
+                    AND rag_documents.workspace_id = :workspace_id';
+        $params = ['workspace_id' => $this->workspaceId];
 
         if ($documentIds !== []) {
             $placeholders = [];
@@ -139,7 +160,7 @@ final readonly class SqliteDocumentChunkRepository
                 $params[$parameterName] = $documentId;
             }
 
-            $sql .= ' AND document_id IN (' . implode(', ', $placeholders) . ')';
+            $sql .= ' AND document_chunks.document_id IN (' . implode(', ', $placeholders) . ')';
         }
 
         $statement = $this->pdo->prepare($sql);
@@ -178,10 +199,12 @@ final readonly class SqliteDocumentChunkRepository
     {
         $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
         $limit = max(1, min(20, $limit));
-        $sql = 'SELECT id, document_id, source_name, content, token_count
+        $sql = 'SELECT document_chunks.id, document_chunks.document_id, document_chunks.source_name, document_chunks.content, document_chunks.token_count
                 FROM document_chunks
-                WHERE document_id IS NOT NULL';
-        $params = [];
+                INNER JOIN rag_documents ON rag_documents.id = document_chunks.document_id
+                WHERE document_chunks.document_id IS NOT NULL
+                    AND rag_documents.workspace_id = :workspace_id';
+        $params = ['workspace_id' => $this->workspaceId];
 
         if ($documentIds !== []) {
             $placeholders = [];
@@ -192,10 +215,10 @@ final readonly class SqliteDocumentChunkRepository
                 $params[$parameterName] = $documentId;
             }
 
-            $sql .= ' AND document_id IN (' . implode(', ', $placeholders) . ')';
+            $sql .= ' AND document_chunks.document_id IN (' . implode(', ', $placeholders) . ')';
         }
 
-        $sql .= ' ORDER BY document_id ASC, id ASC LIMIT ' . $limit;
+        $sql .= ' ORDER BY document_chunks.document_id ASC, document_chunks.id ASC LIMIT ' . $limit;
         $statement = $this->pdo->prepare($sql);
         $statement->execute($params);
 
@@ -213,8 +236,15 @@ final readonly class SqliteDocumentChunkRepository
 
     private function findOrCreateDocument(string $sourceName): int
     {
-        $statement = $this->pdo->prepare('SELECT id FROM rag_documents WHERE source_name = :source_name LIMIT 1');
-        $statement->execute(['source_name' => $sourceName]);
+        $statement = $this->pdo->prepare(
+            'SELECT id FROM rag_documents
+             WHERE source_name = :source_name AND workspace_id = :workspace_id
+             LIMIT 1'
+        );
+        $statement->execute([
+            'source_name' => $sourceName,
+            'workspace_id' => $this->workspaceId,
+        ]);
         $id = $statement->fetchColumn();
 
         if ($id !== false) {
@@ -222,10 +252,11 @@ final readonly class SqliteDocumentChunkRepository
         }
 
         $statement = $this->pdo->prepare(
-            'INSERT INTO rag_documents (source_name, created_at)
-             VALUES (:source_name, :created_at)'
+            'INSERT INTO rag_documents (workspace_id, source_name, created_at)
+             VALUES (:workspace_id, :source_name, :created_at)'
         );
         $statement->execute([
+            'workspace_id' => $this->workspaceId,
             'source_name' => $sourceName,
             'created_at' => date('Y-m-d H:i:s'),
         ]);

@@ -69,6 +69,20 @@ final readonly class OllamaClient
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function showModel(string $modelName): array
+    {
+        try {
+            return $this->postJson('/api/show', [
+                'name' => $modelName,
+            ], $this->connectTimeout);
+        } catch (\RuntimeException) {
+            return [];
+        }
+    }
+
+    /**
      * @return array<int, float>
      */
     public function embedding(string $modelName, string $text): array

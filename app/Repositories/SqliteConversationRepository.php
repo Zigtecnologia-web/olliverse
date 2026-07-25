@@ -25,12 +25,12 @@ final readonly class SqliteConversationRepository implements ConversationReposit
     }
 
     /**
-     * @return array<int, array<string, string>>
+     * @return array<int, array<string, mixed>>
      */
     public function messages(): array
     {
         $statement = $this->pdo->prepare(
-            'SELECT role, content FROM messages WHERE chat_id = :chat_id ORDER BY id ASC'
+            'SELECT role, content, response_duration_ms FROM messages WHERE chat_id = :chat_id ORDER BY id ASC'
         );
         $statement->execute(['chat_id' => $this->chatId]);
 
@@ -38,13 +38,16 @@ final readonly class SqliteConversationRepository implements ConversationReposit
             static fn (array $message): array => [
                 'role' => (string) $message['role'],
                 'content' => (string) $message['content'],
+                'response_duration_ms' => $message['response_duration_ms'] !== null
+                    ? (int) $message['response_duration_ms']
+                    : null,
             ],
             $statement->fetchAll()
         );
     }
 
     /**
-     * @param array<int, array<string, string>> $messages
+     * @param array<int, array<string, mixed>> $messages
      */
     public function replaceMessages(array $messages): void
     {
@@ -52,7 +55,11 @@ final readonly class SqliteConversationRepository implements ConversationReposit
             $this->deleteMessages();
 
             foreach ($this->conversationMessagesOnly($messages) as $message) {
-                $this->insertMessage((string) $message['role'], (string) $message['content']);
+                $this->insertMessage(
+                    (string) $message['role'],
+                    (string) $message['content'],
+                    $this->messageDuration($message)
+                );
             }
 
             $this->touchChat();
@@ -124,7 +131,11 @@ final readonly class SqliteConversationRepository implements ConversationReposit
             $this->deleteMessages();
 
             foreach ($conversationMessages as $message) {
-                $this->insertMessage((string) $message['role'], (string) $message['content']);
+                $this->insertMessage(
+                    (string) $message['role'],
+                    (string) $message['content'],
+                    $this->messageDuration($message)
+                );
             }
 
             $this->updateChatAfterInteraction($model, $conversationMessages);
@@ -189,18 +200,19 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         return $title === '' || $title === 'Nova conversa' || $title === $firstUserTitle;
     }
 
-    public static function createChat(PDO $pdo, string $model, string $systemPrompt, ?int $personaId = null): int
+    public static function createChat(PDO $pdo, string $model, string $systemPrompt, ?int $personaId = null, int $workspaceId = 1): int
     {
         $now = self::timestamp();
         $statement = $pdo->prepare(
-            'INSERT INTO chats (title, model_used, system_prompt, persona_id, created_at, updated_at)
-             VALUES (:title, :model_used, :system_prompt, :persona_id, :created_at, :updated_at)'
+            'INSERT INTO chats (title, model_used, system_prompt, persona_id, workspace_id, created_at, updated_at)
+             VALUES (:title, :model_used, :system_prompt, :persona_id, :workspace_id, :created_at, :updated_at)'
         );
         $statement->execute([
             'title' => 'Nova conversa',
             'model_used' => $model,
             'system_prompt' => $systemPrompt,
             'persona_id' => $personaId,
+            'workspace_id' => $workspaceId,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -233,6 +245,17 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         return $statement->fetchColumn() !== false;
     }
 
+    public static function existsInWorkspace(PDO $pdo, int $chatId, int $workspaceId): bool
+    {
+        $statement = $pdo->prepare('SELECT 1 FROM chats WHERE id = :id AND workspace_id = :workspace_id LIMIT 1');
+        $statement->execute([
+            'id' => $chatId,
+            'workspace_id' => $workspaceId,
+        ]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
     /**
      * @param callable(): void $callback
      */
@@ -258,15 +281,15 @@ final readonly class SqliteConversationRepository implements ConversationReposit
         $statement->execute(['chat_id' => $this->chatId]);
     }
 
-    private function insertMessage(string $role, string $content): void
+    private function insertMessage(string $role, string $content, ?int $responseDurationMs = null): void
     {
         if (!in_array($role, ['user', 'assistant'], true)) {
             throw new RuntimeException('Tipo de mensagem inválido para persistência.');
         }
 
         $statement = $this->pdo->prepare(
-            'INSERT INTO messages (chat_id, role, content, token_count, created_at)
-             VALUES (:chat_id, :role, :content, :token_count, :created_at)'
+            'INSERT INTO messages (chat_id, role, content, token_count, response_duration_ms, created_at)
+             VALUES (:chat_id, :role, :content, :token_count, :response_duration_ms, :created_at)'
         );
         $statement->execute([
             'chat_id' => $this->chatId,
@@ -278,8 +301,25 @@ final readonly class SqliteConversationRepository implements ConversationReposit
                     'content' => $content,
                 ],
             ]),
+            'response_duration_ms' => $role === 'assistant' ? $responseDurationMs : null,
             'created_at' => $this->now(),
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    private function messageDuration(array $message): ?int
+    {
+        $durationMs = $message['response_duration_ms'] ?? null;
+
+        if (!is_numeric($durationMs)) {
+            return null;
+        }
+
+        $durationMs = (int) round((float) $durationMs);
+
+        return $durationMs >= 0 ? $durationMs : null;
     }
 
     /**

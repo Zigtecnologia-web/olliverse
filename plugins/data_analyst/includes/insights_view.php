@@ -2,7 +2,7 @@
     <div class="insights-header">
         <span class="insights-icon" aria-hidden="true">Data</span>
         <div class="insights-text">
-            <strong>Análise inteligente (SQLite / RAG)</strong>
+            <strong>Análise inteligente (Dados locais / RAG)</strong>
             <p class="insights-summary-text"></p>
         </div>
     </div>

@@ -7,6 +7,7 @@ marked.setOptions({ breaks: true });
 updateContextUsage(initialContextUsage);
 renderPersistedAssistantMessages();
 initModelPicker();
+hydrateActiveModelContextLimit();
 initPersonaControls();
 initHistoryPanel();
 initRagPanel();
@@ -61,11 +62,14 @@ function submitChatMessage(overridePrompt = null) {
     if (ragUploadBtn) ragUploadBtn.disabled = true;
     setRagDocumentControlsDisabled(true);
     sendBtn.disabled = true;
+    setSendButtonLoading(sendBtn, true);
     newChatBtn.disabled = true;
 
     const assistantMessage = createStreamingAssistantMessage();
+    const responseStartedAt = performance.now();
     let assistantText = '';
     let ragSources = [];
+    let responseDurationMs = null;
 
     fetch(window.location.href, {
         method: 'POST',
@@ -87,6 +91,10 @@ function submitChatMessage(overridePrompt = null) {
                 showHistoryChatAtTop(payload.chat);
             }
 
+            if (payload.type === 'meta' && payload.response_duration_ms !== undefined) {
+                responseDurationMs = payload.response_duration_ms;
+            }
+
             if (payload.type === 'rag_metadata') {
                 ragSources = payload.sources || [];
             }
@@ -101,7 +109,11 @@ function submitChatMessage(overridePrompt = null) {
         });
     })
     .then(() => {
-        finalizeStreamingAssistantMessage(assistantMessage, assistantText);
+        finalizeStreamingAssistantMessage(
+            assistantMessage,
+            assistantText,
+            responseDurationMs ?? performance.now() - responseStartedAt
+        );
         appendRagSources(assistantMessage.group, ragSources);
         refreshChatHistory().then(() => {
             maybeGenerateChatTitle(model);
@@ -123,6 +135,7 @@ function submitChatMessage(overridePrompt = null) {
         if (ragPickFileBtn) ragPickFileBtn.disabled = false;
         if (ragUploadBtn) ragUploadBtn.disabled = false;
         setRagDocumentControlsDisabled(false);
+        setSendButtonLoading(sendBtn, false);
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
         inputEl.focus();
@@ -130,6 +143,17 @@ function submitChatMessage(overridePrompt = null) {
 }
 
 window.OlliverseSubmitMessage = submitChatMessage;
+
+function setSendButtonLoading(sendBtn, isLoading) {
+    if (!sendBtn) {
+        return;
+    }
+
+    sendBtn.classList.toggle('loading', isLoading);
+    sendBtn.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+    sendBtn.setAttribute('aria-label', isLoading ? 'Enviando mensagem' : 'Enviar mensagem');
+    sendBtn.title = isLoading ? 'Enviando mensagem' : 'Enviar mensagem';
+}
 
 function initProviderSelector() {
     const providerSelect = document.getElementById('providerSelect');
@@ -326,11 +350,14 @@ function submitWebAiMessage(prompt) {
     if (ragPickFileBtn) ragPickFileBtn.disabled = true;
     setRagDocumentControlsDisabled(true);
     sendBtn.disabled = true;
+    setSendButtonLoading(sendBtn, true);
     newChatBtn.disabled = true;
 
     const assistantMessage = createStreamingAssistantMessage();
+    const responseStartedAt = performance.now();
     let assistantText = '';
     let ragSources = [];
+    let responseDurationMs = null;
 
     webAiRagContext(prompt)
     .then((ragContext) => {
@@ -351,14 +378,17 @@ function submitWebAiMessage(prompt) {
             renderAssistantMessageContent(assistantMessage.message, assistantText);
         }, setWebAiStatus);
     })
-    .then((fullText) => persistWebAiExchange(prompt, fullText || assistantText))
+    .then((fullText) => {
+        responseDurationMs = performance.now() - responseStartedAt;
+        return persistWebAiExchange(prompt, fullText || assistantText, responseDurationMs);
+    })
     .then((payload) => {
-        finalizeStreamingAssistantMessage(assistantMessage, assistantText);
+        finalizeStreamingAssistantMessage(assistantMessage, assistantText, responseDurationMs);
         appendRagSources(assistantMessage.group, ragSources);
         window.OlliverseConfig.initialMessages = payload.messages || [
             ...(window.OlliverseConfig.initialMessages || []),
             { role: 'user', content: prompt },
-            { role: 'assistant', content: assistantText },
+            { role: 'assistant', content: assistantText, response_duration_ms: responseDurationMs },
         ];
         if (payload.chat) {
             showHistoryChatAtTop(payload.chat);
@@ -383,6 +413,7 @@ function submitWebAiMessage(prompt) {
         modelSelect.disabled = !hasAvailableModels;
         personaSelect.disabled = false;
         providerSelect.disabled = false;
+        setSendButtonLoading(sendBtn, false);
         sendBtn.disabled = false;
         newChatBtn.disabled = false;
         if (ragPickFileBtn) ragPickFileBtn.disabled = false;
@@ -483,13 +514,17 @@ function webAiRagContext(prompt) {
     }));
 }
 
-function persistWebAiExchange(prompt, assistantResponse) {
+function persistWebAiExchange(prompt, assistantResponse, responseDurationMs = null) {
     const url = new URL(window.location.href);
     const body = new URLSearchParams({
         prompt,
         assistant_response: assistantResponse,
         web_ai_model: window.OlliverseConfig.webAi.modelId,
     });
+
+    if (responseDurationMs !== null) {
+        body.set('response_duration_ms', String(Math.max(0, Math.round(Number(responseDurationMs) || 0))));
+    }
 
     url.searchParams.set('action', 'web_ai_persist');
 

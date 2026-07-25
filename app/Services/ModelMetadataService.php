@@ -9,6 +9,7 @@ final readonly class ModelMetadataService
     public function __construct(
         private OllamaClient $ollamaClient,
         private int $cacheTtl,
+        private int $fallbackContextLength,
     ) {
     }
 
@@ -28,9 +29,9 @@ final readonly class ModelMetadataService
         }
 
         $fallbackSizeGb = $this->ollamaClient->modelSizeGb($modelName);
-        $metadata = $this->parseShowVerbose(
+        $metadata = $this->parseShowResponse(
             $modelName,
-            $this->executeShowVerbose($modelName),
+            $this->ollamaClient->showModel($modelName),
             $fallbackSizeGb
         );
 
@@ -45,57 +46,87 @@ final readonly class ModelMetadataService
     /**
      * @return array<string, mixed>
      */
-    private function parseShowVerbose(string $modelName, string $verboseOutput, ?float $fallbackSizeGb = null): array
+    private function parseShowResponse(string $modelName, array $showResponse, ?float $fallbackSizeGb = null): array
     {
-        $sizeGb = SizeParser::sizeToGb($this->extractValue($verboseOutput, [
-            '/^\s*(?:size|model size)\s+([\d.,]+\s*(?:bytes?|kb|kib|mb|mib|gb|gib|tb|tib)?)/mi',
-        ])) ?? $fallbackSizeGb;
+        $details = isset($showResponse['details']) && is_array($showResponse['details'])
+            ? $showResponse['details']
+            : [];
+        $modelInfo = isset($showResponse['model_info']) && is_array($showResponse['model_info'])
+            ? $showResponse['model_info']
+            : [];
+        $parameters = is_string($showResponse['parameters'] ?? null) ? $showResponse['parameters'] : '';
+        $modelfile = is_string($showResponse['modelfile'] ?? null) ? $showResponse['modelfile'] : '';
 
-        $family = $this->extractValue($verboseOutput, [
-            '/^\s*general\.architecture\s+([^\r\n]+)/mi',
-            '/^\s*architecture\s+([^\r\n]+)/mi',
-            '/^\s*family\s+([^\r\n]+)/mi',
-            '/^\s*famil(?:y|ia)\s+([^\r\n]+)/mi',
+        $family = $this->firstString([
+            $details['family'] ?? null,
+            $modelInfo['general.architecture'] ?? null,
+            $modelInfo['architecture'] ?? null,
         ]);
-
-        $contextLength = $this->extractValue($verboseOutput, [
-            '/^\s*(?:context length|context_length)\s+(\d+)/mi',
-            '/^\s*[a-z0-9_.-]+\.context_length\s+(\d+)/mi',
-        ]);
-
-        $quantization = $this->extractValue($verboseOutput, [
-            '/^\s*quantization\s+([A-Z0-9_]+)/mi',
-            '/^\s*general\.file_type\s+([^\r\n]+)/mi',
+        $contextLength = $this->extractContextLength($modelInfo, $parameters, $modelfile);
+        $quantization = $this->firstString([
+            $details['quantization_level'] ?? null,
+            $details['quantization'] ?? null,
+            $modelInfo['general.file_type'] ?? null,
         ]);
 
         return [
             'model' => $modelName,
-            'size_gb' => $sizeGb,
+            'size_gb' => $fallbackSizeGb,
             'family' => $family ?: null,
-            'context_length' => $contextLength !== null ? (int) $contextLength : null,
+            'context_length' => $contextLength ?? $this->fallbackContextLength,
+            'context_fallback' => $contextLength === null,
             'quantization' => $quantization ?: null,
         ];
     }
 
-    private function executeShowVerbose(string $modelName): string
-    {
-        $command = 'ollama show --verbose ' . escapeshellarg($modelName) . ' 2>&1';
-        $output = shell_exec($command);
-
-        return is_string($output) ? $output : '';
-    }
-
     /**
-     * @param array<int, string> $patterns
+     * @param array<string, mixed> $modelInfo
      */
-    private function extractValue(string $verboseOutput, array $patterns): ?string
+    private function extractContextLength(array $modelInfo, string $parameters, string $modelfile): ?int
     {
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $verboseOutput, $matches) === 1) {
-                return trim($matches[1]);
+        foreach ($modelInfo as $key => $value) {
+            if (!is_scalar($value) || !str_ends_with((string) $key, '.context_length')) {
+                continue;
+            }
+
+            $contextLength = $this->positiveInt($value);
+
+            if ($contextLength !== null) {
+                return $contextLength;
+            }
+        }
+
+        foreach ([$parameters, $modelfile] as $source) {
+            if (preg_match('/^\s*(?:PARAMETER\s+)?num_ctx\s+(\d+)/mi', $source, $matches) === 1) {
+                return $this->positiveInt($matches[1]);
             }
         }
 
         return null;
+    }
+
+    /**
+     * @param array<int, mixed> $values
+     */
+    private function firstString(array $values): ?string
+    {
+        foreach ($values as $value) {
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
+    }
+
+    private function positiveInt(mixed $value): ?int
+    {
+        if (!is_scalar($value)) {
+            return null;
+        }
+
+        $number = (int) $value;
+
+        return $number > 0 ? $number : null;
     }
 }

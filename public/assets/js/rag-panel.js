@@ -111,21 +111,12 @@ function uploadRagDocument() {
 
     prepareRagUploadFile(file)
     .then((uploadFile) => {
-        const body = new FormData();
-        body.append('document', uploadFile, file.name);
-
-        return fetch(url.toString(), {
-            method: 'POST',
-            body,
-        });
-    })
-    .then((response) => response.json().then((payload) => {
-        if (!response.ok || !payload.success) {
-            throw new Error(payload.error || 'Não foi possível preparar o documento.');
+        if (shouldUseChunkedUpload(uploadFile, file.name)) {
+            return uploadRagDocumentInChunks(uploadFile, file.name);
         }
 
-        return payload;
-    }))
+        return uploadRagDocumentDirectly(uploadFile, file.name, url);
+    })
     .then((payload) => {
         fileInput.value = '';
         renderRagDocuments(payload.documents || []);
@@ -138,6 +129,115 @@ function uploadRagDocument() {
     .finally(() => {
         pickFileBtn.disabled = false;
         fileInput.disabled = false;
+    });
+}
+
+function uploadRagDocumentDirectly(file, fileName, url) {
+    const body = new FormData();
+
+    body.append('document', file, fileName);
+
+    return fetch(url.toString(), {
+        method: 'POST',
+        body,
+    })
+    .then((response) => parseRagJsonResponse(response).then((payload) => {
+        if (!response.ok || !payload.success) {
+            throw new Error(payload.error || 'Não foi possível preparar o documento.');
+        }
+
+        return payload;
+    }));
+}
+
+function shouldUseChunkedUpload(file, originalName) {
+    return isCsvFileName(originalName || file?.name)
+        && Number(file?.size || 0) > chunkUploadSize();
+}
+
+function chunkUploadSize() {
+    return Math.floor(1.5 * 1024 * 1024);
+}
+
+function uploadRagDocumentInChunks(file, originalName) {
+    const chunkSize = chunkUploadSize();
+    const totalChunks = Math.ceil(file.size / chunkSize);
+    const uploadId = createUploadId();
+    const url = new URL(window.location.href);
+
+    url.searchParams.set('action', 'rag_chunk_upload');
+    setRagStatus('Enviando arquivo em lotes...', false, 0);
+
+    let chain = Promise.resolve(null);
+
+    for (let index = 0; index < totalChunks; index += 1) {
+        chain = chain.then(() => {
+            const start = index * chunkSize;
+            const end = Math.min(file.size, start + chunkSize);
+            const body = new FormData();
+
+            body.append('upload_id', uploadId);
+            body.append('file_name', originalName || file.name || 'dados.csv');
+            body.append('chunk_index', String(index));
+            body.append('total_chunks', String(totalChunks));
+            body.append('chunk', file.slice(start, end), `chunk-${index}.part`);
+
+            return fetch(url.toString(), {
+                method: 'POST',
+                body,
+            })
+            .then((response) => parseRagJsonResponse(response).then((payload) => {
+                if (!response.ok || !payload.success) {
+                    throw new Error(payload.error || 'Não foi possível enviar o lote do arquivo.');
+                }
+
+                const percentage = Math.round(((index + 1) / totalChunks) * 100);
+                setRagStatus(`Enviando arquivo em lotes... ${percentage}%`, false, percentage);
+
+                return payload;
+            }));
+        });
+    }
+
+    return chain.then((payload) => {
+        if (!payload?.complete) {
+            throw new Error('Upload em lotes finalizado sem confirmação do servidor.');
+        }
+
+        setRagStatus('Processando dados recebidos...', false, 100);
+
+        return payload;
+    });
+}
+
+function createUploadId() {
+    const random = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    return String(random).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function isCsvFileName(name) {
+    return String(name || '').toLowerCase().endsWith('.csv');
+}
+
+function parseRagJsonResponse(response) {
+    if (!response || typeof response.text !== 'function') {
+        return Promise.resolve(response);
+    }
+
+    return response.text().then((text) => {
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            const cleanText = text
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]*>/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const detail = cleanText ? ` Detalhe: ${cleanText.slice(0, 180)}` : '';
+
+            throw new Error(`O servidor retornou uma resposta inválida ao importar o arquivo.${detail}`);
+        }
     });
 }
 
@@ -626,9 +726,25 @@ function escapeHtml(value) {
         .replaceAll("'", '&#039;');
 }
 
-function setRagStatus(message, isError = false) {
+function setRagStatus(message, isError = false, progress = null) {
     const status = document.getElementById('ragStatus');
 
-    status.textContent = message;
+    if (!status) {
+        return;
+    }
+
+    if (Number.isFinite(progress)) {
+        const percentage = Math.max(0, Math.min(100, Number(progress)));
+
+        status.innerHTML = [
+            `<span>${escapeHtml(message)}</span>`,
+            '<span class="rag-upload-progress" aria-hidden="true">',
+            `<span class="rag-upload-progress-fill" style="width: ${percentage}%"></span>`,
+            '</span>',
+        ].join('');
+    } else {
+        status.textContent = message;
+    }
+
     status.classList.toggle('error', isError);
 }
