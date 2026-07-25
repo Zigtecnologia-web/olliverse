@@ -8,8 +8,10 @@ use PDO;
 
 final readonly class SqliteChatHistoryRepository
 {
-    public function __construct(private PDO $pdo)
-    {
+    public function __construct(
+        private PDO $pdo,
+        private int $workspaceId = 1,
+    ) {
     }
 
     /**
@@ -17,7 +19,7 @@ final readonly class SqliteChatHistoryRepository
      */
     public function all(): array
     {
-        return $this->chatsForWhere('');
+        return $this->chatsForWhere('WHERE c.workspace_id = :workspace_id');
     }
 
     /**
@@ -32,13 +34,15 @@ final readonly class SqliteChatHistoryRepository
         }
 
         return $this->chatsForWhere(
-            'WHERE c.title LIKE :query ESCAPE \'\\\'
+            'WHERE c.workspace_id = :workspace_id
+                AND (
+                    c.title LIKE :query ESCAPE \'\\\'
                 OR EXISTS (
                     SELECT 1
                     FROM messages search_messages
                     WHERE search_messages.chat_id = c.id
                         AND search_messages.content LIKE :query ESCAPE \'\\\'
-                )',
+                ))',
             ['query' => '%' . $this->escapeLike($query) . '%']
         );
     }
@@ -70,6 +74,8 @@ final readonly class SqliteChatHistoryRepository
          FROM chats c
          ' . $whereSql . '
          ORDER BY datetime(c.updated_at) DESC, c.id DESC';
+
+        $parameters['workspace_id'] = $this->workspaceId;
 
         if ($parameters !== []) {
             $statement = $this->pdo->prepare($sql);
@@ -109,10 +115,13 @@ final readonly class SqliteChatHistoryRepository
                     WHERE m.chat_id = c.id
                 ) AS message_count
              FROM chats c
-             WHERE c.id = :id
+             WHERE c.id = :id AND c.workspace_id = :workspace_id
              LIMIT 1'
         );
-        $statement->execute(['id' => $chatId]);
+        $statement->execute([
+            'id' => $chatId,
+            'workspace_id' => $this->workspaceId,
+        ]);
         $chat = $statement->fetch();
 
         return is_array($chat) ? $this->normalize($chat) : null;
@@ -124,8 +133,11 @@ final readonly class SqliteChatHistoryRepository
             return false;
         }
 
-        $statement = $this->pdo->prepare('DELETE FROM chats WHERE id = :id');
-        $statement->execute(['id' => $chatId]);
+        $statement = $this->pdo->prepare('DELETE FROM chats WHERE id = :id AND workspace_id = :workspace_id');
+        $statement->execute([
+            'id' => $chatId,
+            'workspace_id' => $this->workspaceId,
+        ]);
 
         if (isset($_SESSION['olliverse_persona_cache'][$chatId])) {
             unset($_SESSION['olliverse_persona_cache'][$chatId]);

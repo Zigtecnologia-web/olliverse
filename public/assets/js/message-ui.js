@@ -1,9 +1,20 @@
 function updateContextUsage(contextUsage) {
     const fill = document.getElementById('contextBarFill');
     const label = document.getElementById('contextLabel');
-    const percentage = Math.max(0, Math.min(100, Number(contextUsage?.percentage || 0)));
     const tokens = Number(contextUsage?.tokens || 0);
-    const limit = Number(contextUsage?.limit || 0);
+    const configuredLimit = Number(contextUsage?.limit || 0);
+    const dynamicLimit = Number(window.OlliverseState?.activeContextTokenLimit || 0);
+    const limit = dynamicLimit > 0 ? dynamicLimit : configuredLimit;
+    const calculatedPercentage = limit > 0 ? Math.round((tokens / limit) * 100) : Number(contextUsage?.percentage || 0);
+    const percentage = Math.max(0, Math.min(100, calculatedPercentage));
+
+    if (window.OlliverseState) {
+        window.OlliverseState.lastContextUsage = {
+            tokens,
+            limit,
+            percentage,
+        };
+    }
 
     fill.style.width = `${percentage}%`;
     fill.classList.toggle('warning', percentage >= 70 && percentage < 90);
@@ -11,6 +22,17 @@ function updateContextUsage(contextUsage) {
     label.textContent = limit > 0
         ? `Contexto ${percentage}% (${tokens}/${limit})`
         : `Contexto ${percentage}%`;
+}
+
+function setActiveContextTokenLimit(limit) {
+    const value = Number(limit || 0);
+
+    if (!window.OlliverseState || !Number.isFinite(value) || value <= 0) {
+        return;
+    }
+
+    window.OlliverseState.activeContextTokenLimit = value;
+    updateContextUsage(window.OlliverseState.lastContextUsage || window.OlliverseConfig.initialContextUsage);
 }
 
 function renderAssistantMessageContent(messageDiv, text) {
@@ -40,8 +62,10 @@ function renderPersistedAssistantMessages() {
 
         try {
             const text = JSON.parse(source.dataset.markdownSource || '""');
+            const responseDurationMs = source.dataset.responseDurationMs || null;
 
             renderAssistantMessageContent(messageDiv, text);
+            appendResponseDuration(messageDiv.closest('.message-group'), responseDurationMs);
             appendCopyResponseButton(messageDiv.closest('.message-group'), text);
         } catch (error) {
             console.error('Erro ao renderizar mensagem persistida:', error);
@@ -49,10 +73,12 @@ function renderPersistedAssistantMessages() {
     });
 }
 
-function finalizeStreamingAssistantMessage(assistantMessage, text) {
+function finalizeStreamingAssistantMessage(assistantMessage, text, responseDurationMs = null) {
     const shouldStickToBottom = shouldScrollToBottom();
 
     renderAssistantMessageContent(assistantMessage.message, text);
+
+    appendResponseDuration(assistantMessage.group, responseDurationMs);
 
     if (text.trim() !== '') {
         appendCopyResponseButton(assistantMessage.group, text);
@@ -61,6 +87,58 @@ function finalizeStreamingAssistantMessage(assistantMessage, text) {
     if (shouldStickToBottom) {
         scrollToBottom();
     }
+}
+
+function appendResponseDuration(messageGroup, durationMs) {
+    if (!messageGroup) {
+        return;
+    }
+
+    const existingDuration = messageGroup.querySelector('.response-duration');
+
+    if (existingDuration) {
+        existingDuration.remove();
+    }
+
+    const formattedDuration = formatResponseDuration(durationMs);
+
+    if (!formattedDuration) {
+        return;
+    }
+
+    const durationInfo = document.createElement('div');
+
+    durationInfo.className = 'response-duration';
+    durationInfo.textContent = `Resposta entregue em ${formattedDuration}`;
+    messageGroup.appendChild(durationInfo);
+}
+
+function formatResponseDuration(durationMs) {
+    const duration = Number(durationMs);
+
+    if (!Number.isFinite(duration) || duration < 0) {
+        return '';
+    }
+
+    if (duration < 1000) {
+        return `${Math.max(1, Math.round(duration))}ms`;
+    }
+
+    if (duration < 60000) {
+        return `${(duration / 1000).toLocaleString('pt-BR', {
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+        })}s`;
+    }
+
+    const minutes = Math.floor(duration / 60000);
+    const seconds = Math.round((duration % 60000) / 1000);
+
+    if (seconds === 60) {
+        return `${minutes + 1}min 0s`;
+    }
+
+    return `${minutes}min ${seconds}s`;
 }
 
 function appendRagSources(messageGroup, sources) {
@@ -127,11 +205,12 @@ function reusePrompt(text) {
     inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 }
 
-function renderAssistantMessage(messageGroup, messageDiv, text) {
+function renderAssistantMessage(messageGroup, messageDiv, text, responseDurationMs = null) {
     const normalizedText = normalizeCodeMarkdown(text);
 
     if (!window.marked || !window.DOMPurify) {
         renderBasicMarkdown(messageDiv, normalizedText);
+        appendResponseDuration(messageGroup, responseDurationMs);
         appendCopyResponseButton(messageGroup, text);
         return;
     }
@@ -141,10 +220,12 @@ function renderAssistantMessage(messageGroup, messageDiv, text) {
         enhanceCodeBlocks(messageDiv);
         processPluginContent(messageDiv);
 
+        appendResponseDuration(messageGroup, responseDurationMs);
         appendCopyResponseButton(messageGroup, text);
     } catch (error) {
         console.error('Erro ao renderizar Markdown:', error);
         renderBasicMarkdown(messageDiv, normalizedText);
+        appendResponseDuration(messageGroup, responseDurationMs);
         appendCopyResponseButton(messageGroup, text);
     }
 }
@@ -190,7 +271,13 @@ function highlightCodeBlock(block) {
     }
 
     try {
-        hljs.highlightElement(block);
+        if (typeof hljs.highlightElement === 'function') {
+            hljs.highlightElement(block);
+        } else if (typeof hljs.highlightBlock === 'function') {
+            hljs.highlightBlock(block);
+        } else {
+            block.innerHTML = applyBasicHighlight(originalCode, language);
+        }
     } catch (error) {
         console.error('Erro ao aplicar syntax highlighting:', error);
         block.innerHTML = applyBasicHighlight(originalCode, language);
@@ -775,21 +862,30 @@ function appendCodeBlock(container, code, language) {
 function applyBasicHighlight(code, language) {
     let escapedCode = escapeHtml(code);
     const protectedTokens = [];
+    const normalizedLanguage = normalizeLanguageName(language);
     const languageKeywords = {
         php: 'abstract|array|as|break|case|catch|class|const|continue|default|do|echo|else|elseif|extends|final|for|foreach|function|if|implements|interface|namespace|new|private|protected|public|return|static|switch|throw|try|use|while',
         javascript: 'async|await|break|case|catch|class|const|continue|default|else|export|extends|finally|for|function|if|import|let|new|return|switch|throw|try|var|while',
         js: 'async|await|break|case|catch|class|const|continue|default|else|export|extends|finally|for|function|if|import|let|new|return|switch|throw|try|var|while',
+        python: 'and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield',
+        py: 'and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield',
         css: 'align-items|background|border|color|display|flex|font-size|gap|grid|height|justify-content|margin|padding|position|width',
         html: 'html|head|body|div|span|button|form|input|script|style|link|meta|title'
     };
-    const keywords = languageKeywords[language] || languageKeywords.javascript;
+    const keywords = languageKeywords[normalizedLanguage] || '';
+    const lineCommentPattern = normalizedLanguage === 'python' || normalizedLanguage === 'py'
+        ? /(#.*)/g
+        : /(&lt;!--[\s\S]*?--&gt;|\/\/.*)/g;
 
     escapedCode = escapedCode
         .replace(/(&#039;[^&\n]*(?:&#039;)|&quot;[^&\n]*(?:&quot;)|`[^`\n]*`)/g, (match) => protectToken(`<span class="code-string">${match}</span>`, protectedTokens))
-        .replace(/(&lt;!--[\s\S]*?--&gt;|\/\/.*)/g, (match) => protectToken(`<span class="code-comment">${match}</span>`, protectedTokens))
+        .replace(lineCommentPattern, (match) => protectToken(`<span class="code-comment">${match}</span>`, protectedTokens))
         .replace(/&(?:amp|lt|gt|quot|#039);/g, (match) => protectToken(match, protectedTokens))
-        .replace(/\b(\d+)\b/g, '<span class="code-number">$1</span>')
-        .replace(new RegExp(`\\b(${keywords})\\b`, 'g'), '<span class="code-keyword">$1</span>');
+        .replace(/\b(\d+)\b/g, '<span class="code-number">$1</span>');
+
+    if (keywords !== '') {
+        escapedCode = escapedCode.replace(new RegExp(`\\b(${keywords})\\b`, 'g'), '<span class="code-keyword">$1</span>');
+    }
 
     return protectedTokens.reduce((highlightedCode, token, index) => {
         return highlightedCode.replace(createProtectedToken(index), token);

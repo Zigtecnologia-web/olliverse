@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Olliverse</title>
+    <link rel="icon" type="image/svg+xml" href="public/assets/img/favicon.svg">
     <link rel="stylesheet" href="public/vendor/highlight.js/styles/github-dark.min.css">
     <link rel="stylesheet" href="public/assets/css/app.css">
     <?php foreach ($activePlugins as $plugin): ?>
@@ -17,6 +18,23 @@
 
 <div class="app-shell" id="appShell">
 <aside class="history-sidebar" id="historySidebar" aria-label="Histórico de conversas">
+    <div class="workspace-switcher" id="workspaceSwitcher">
+        <button type="button" id="workspaceMenuBtn" class="workspace-menu-btn" aria-label="Selecionar workspace" aria-expanded="false">
+            <span id="activeWorkspaceIcon" class="workspace-menu-icon"><?php echo htmlspecialchars((string) $activeWorkspace['icon'], ENT_QUOTES, 'UTF-8'); ?></span>
+            <span id="activeWorkspaceName" class="workspace-menu-name"><?php echo htmlspecialchars((string) $activeWorkspace['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+            <span class="workspace-menu-caret" aria-hidden="true"><?php echo iconSvg('chevron-down'); ?></span>
+        </button>
+        <div id="workspaceMenuList" class="workspace-menu-list" role="menu" aria-labelledby="workspaceMenuBtn">
+            <div id="workspaceOptions" class="workspace-options"></div>
+            <button type="button" id="newWorkspaceToggleBtn" class="workspace-new-toggle"><?php echo iconSvg('plus'); ?><span>Novo workspace</span></button>
+            <form id="workspaceCreateForm" class="workspace-create-form" hidden>
+                <input type="text" id="workspaceIconInput" name="icon" class="workspace-icon-input" maxlength="3" placeholder="#" aria-label="Ícone do workspace">
+                <input type="text" id="workspaceNameInput" name="name" class="workspace-name-input" maxlength="36" placeholder="Nome do workspace" aria-label="Nome do workspace" required>
+                <button type="submit" class="workspace-save-btn" aria-label="Salvar workspace"><?php echo iconSvg('check'); ?></button>
+            </form>
+            <div id="workspaceStatus" class="workspace-status" aria-live="polite"></div>
+        </div>
+    </div>
     <div class="history-sidebar-header">
         <div>
             <h2>Histórico</h2>
@@ -73,7 +91,13 @@
         <div class="chat-header-row chat-header-main">
             <button type="button" id="historyToggleBtn" class="config-btn history-toggle-btn" aria-label="Abrir histórico" title="Abrir histórico" data-tooltip="Abrir histórico"><?php echo iconSvg('sidebar'); ?></button>
             <div class="header-title">
-                <h1>Olliverse</h1>
+                <h1 class="olliverse-logo" aria-label="Olliverse">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" stroke="#00F576" stroke-width="2.5" stroke-dasharray="4 2"/>
+                        <circle cx="12" cy="12" r="4" fill="#00F576"/>
+                    </svg>
+                    <span class="olliverse-logo-word"><span class="olliverse-logo-olli">Olli</span>verse</span>
+                </h1>
             </div>
             <button type="button" id="zenModeBtn" class="config-btn zen-mode-btn" aria-label="Ativar modo foco" title="Ativar modo foco" data-tooltip="Ativar modo foco" aria-pressed="false"><?php echo iconSvg('maximize-2'); ?></button>
             <div class="model-controls">
@@ -133,17 +157,31 @@
     <div class="chat-messages" id="chatMessages">
     <?php if ($initialMessages === []): ?>
         <div class="message-group assistant">
+            <span class="message-avatar olliverse-message-avatar" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" stroke="#00F576" stroke-width="2.5" stroke-dasharray="4 2"></circle>
+                    <circle cx="12" cy="12" r="4" fill="#00F576"></circle>
+                </svg>
+            </span>
             <div class="message assistant"><?php echo htmlspecialchars($initialAssistantMessage, ENT_QUOTES, 'UTF-8'); ?></div>
         </div>
     <?php else: ?>
         <?php foreach ($initialMessages as $message): ?>
             <?php $role = $message['role'] === 'user' ? 'user' : 'assistant'; ?>
             <div class="message-group <?php echo $role; ?>">
+                <?php if ($role === 'assistant'): ?>
+                    <span class="message-avatar olliverse-message-avatar" aria-hidden="true">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="10" stroke="#00F576" stroke-width="2.5" stroke-dasharray="4 2"></circle>
+                            <circle cx="12" cy="12" r="4" fill="#00F576"></circle>
+                        </svg>
+                    </span>
+                <?php endif; ?>
                 <div class="message <?php echo $role; ?>">
                     <?php if ($role === 'user'): ?>
                         <span class="message-text"><?php echo htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php else: ?>
-                        <div class="assistant-markdown-source" data-markdown-source="<?php echo htmlspecialchars(json_encode($message['content'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>">
+                        <div class="assistant-markdown-source" data-markdown-source="<?php echo htmlspecialchars(json_encode($message['content'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>" data-response-duration-ms="<?php echo htmlspecialchars((string) ($message['response_duration_ms'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                             <?php echo nl2br(htmlspecialchars($message['content'], ENT_QUOTES, 'UTF-8')); ?>
                         </div>
                     <?php endif; ?>
@@ -318,6 +356,8 @@
         initialContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
         initialRagDocuments: <?php echo json_encode($initialRagDocuments, JSON_UNESCAPED_UNICODE); ?>,
         initialChatHistory: <?php echo json_encode($initialChatHistory, JSON_UNESCAPED_UNICODE); ?>,
+        initialWorkspaces: <?php echo json_encode($initialWorkspaces, JSON_UNESCAPED_UNICODE); ?>,
+        activeWorkspace: <?php echo json_encode($activeWorkspace, JSON_UNESCAPED_UNICODE); ?>,
         personas: <?php echo json_encode($personas, JSON_UNESCAPED_UNICODE); ?>,
         activePersona: <?php echo json_encode($activePersona, JSON_UNESCAPED_UNICODE); ?>,
         plugins: <?php echo json_encode($availablePlugins, JSON_UNESCAPED_UNICODE); ?>,
@@ -336,8 +376,11 @@
         historySearchQuery: '',
         historySearchChatIds: null,
         historySearchResults: null,
+        workspaceSwitching: false,
         titleGenerationChatIds: new Set(),
         modelMetadataCache: new Map(),
+        activeContextTokenLimit: Number(<?php echo json_encode((int) ($initialContextUsage['limit'] ?? $config->contextTokenLimit)); ?>),
+        lastContextUsage: <?php echo json_encode($initialContextUsage, JSON_UNESCAPED_UNICODE); ?>,
     };
 </script>
 	<script src="public/assets/js/model-panel.js"></script>

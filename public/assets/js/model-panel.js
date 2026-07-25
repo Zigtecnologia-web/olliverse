@@ -47,8 +47,14 @@ function selectModel(model) {
 
     closeModelMenu();
 
-    if (document.getElementById('modelInfoModal').classList.contains('open')) {
-        loadModelMetadata(model);
+    loadModelMetadata(model, document.getElementById('modelInfoModal').classList.contains('open'));
+}
+
+function hydrateActiveModelContextLimit() {
+    const model = document.getElementById('modelSelect')?.value || '';
+
+    if (model) {
+        loadModelMetadata(model, false);
     }
 }
 
@@ -59,7 +65,7 @@ function openModelInfoModal() {
     document.getElementById('modelInfoTitle').textContent = model || 'Sem modelo';
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
-    loadModelMetadata(model);
+    loadModelMetadata(model, true);
     document.getElementById('closeModelInfoModalBtn').focus();
 }
 
@@ -71,18 +77,22 @@ function closeModelInfoModal() {
     document.getElementById('modelInfoBtn').focus();
 }
 
-function loadModelMetadata(model) {
+function loadModelMetadata(model, renderModal = true) {
     if (!model || !window.OlliverseConfig.hasAvailableModels) {
-        showModelMetadataError('Nenhum modelo disponível.');
+        if (renderModal) {
+            showModelMetadataError('Nenhum modelo disponível.');
+        }
         return;
     }
 
     if (window.OlliverseState.modelMetadataCache.has(model)) {
-        renderModelMetadata(window.OlliverseState.modelMetadataCache.get(model));
+        applyModelMetadata(window.OlliverseState.modelMetadataCache.get(model), renderModal);
         return;
     }
 
-    setModelMetadataLoading();
+    if (renderModal) {
+        setModelMetadataLoading();
+    }
 
     const url = new URL(window.location.href);
     url.search = '';
@@ -103,11 +113,23 @@ function loadModelMetadata(model) {
     })
     .then((metadata) => {
         window.OlliverseState.modelMetadataCache.set(model, metadata);
-        renderModelMetadata(metadata);
+        applyModelMetadata(metadata, renderModal);
     })
     .catch((error) => {
-        showModelMetadataError(error.message || 'Erro ao carregar metadados.');
+        if (renderModal) {
+            showModelMetadataError(error.message || 'Erro ao carregar metadados.');
+        }
     });
+}
+
+function applyModelMetadata(metadata, renderModal) {
+    if (Number(metadata?.context_length || 0) > 0) {
+        setActiveContextTokenLimit(metadata.context_length);
+    }
+
+    if (renderModal) {
+        renderModelMetadata(metadata);
+    }
 }
 
 function setModelMetadataLoading() {
@@ -371,8 +393,7 @@ function fillPersonaForm(personaId) {
     document.getElementById('personaNameInput').value = persona.name || '';
     document.getElementById('personaDescriptionInput').value = persona.description || '';
     document.getElementById('systemPromptInput').value = persona.prompt_content || '';
-    document.getElementById('deletePersonaBtn').disabled = Number(persona.id) === Number(window.OlliverseConfig.activePersona.id)
-        && window.OlliverseConfig.personas.length <= 1;
+    document.getElementById('deletePersonaBtn').disabled = Boolean(persona.is_public);
     updateGeneratePromptButton();
 }
 

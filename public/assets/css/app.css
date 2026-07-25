@@ -65,6 +65,197 @@ body.documentation-body {
     pointer-events: none;
 }
 
+.workspace-switcher {
+    border-bottom: 1px solid #29292e;
+    padding: 12px 16px;
+    position: relative;
+}
+
+.workspace-menu-btn {
+    align-items: center;
+    background-color: rgba(37, 37, 43, 0.78);
+    border: 1px solid rgba(63, 63, 70, 0.72);
+    border-radius: 8px;
+    color: #e1e1e6;
+    cursor: pointer;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 28px minmax(0, 1fr) 16px;
+    min-height: 40px;
+    padding: 6px 9px 6px 6px;
+    width: 100%;
+}
+
+.workspace-menu-btn:hover,
+.workspace-menu-btn:focus,
+.workspace-switcher.open .workspace-menu-btn {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: #04d361;
+    outline: none;
+}
+
+.workspace-menu-icon,
+.workspace-option-icon {
+    align-items: center;
+    background-color: #202027;
+    border: 1px solid #323238;
+    border-radius: 6px;
+    color: #04d361;
+    display: inline-flex;
+    font-size: 0.82rem;
+    font-weight: 800;
+    height: 28px;
+    justify-content: center;
+    min-width: 0;
+    overflow: hidden;
+    width: 28px;
+}
+
+.workspace-menu-name,
+.workspace-option-name {
+    min-width: 0;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-menu-name {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.workspace-menu-caret svg {
+    color: #7c7c8a;
+    height: 15px;
+    width: 15px;
+}
+
+.workspace-menu-list {
+    background-color: #202027;
+    border: 1px solid #323238;
+    border-radius: 8px;
+    box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
+    display: none;
+    gap: 8px;
+    left: 16px;
+    padding: 8px;
+    position: absolute;
+    right: 16px;
+    top: calc(100% - 6px);
+    z-index: 100;
+}
+
+.workspace-switcher.open .workspace-menu-list {
+    display: grid;
+}
+
+.workspace-options {
+    display: grid;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.workspace-option,
+.workspace-new-toggle {
+    align-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #c4c4cc;
+    cursor: pointer;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 28px minmax(0, 1fr);
+    min-height: 38px;
+    padding: 5px 6px;
+}
+
+.workspace-option:hover,
+.workspace-option:focus,
+.workspace-option.active,
+.workspace-new-toggle:hover,
+.workspace-new-toggle:focus {
+    background-color: rgba(4, 211, 97, 0.08);
+    border-color: rgba(4, 211, 97, 0.22);
+    color: #e1e1e6;
+    outline: none;
+}
+
+.workspace-option.active {
+    color: #04d361;
+}
+
+.workspace-option:disabled,
+.workspace-new-toggle:disabled {
+    cursor: default;
+    opacity: 0.72;
+}
+
+.workspace-new-toggle svg {
+    height: 16px;
+    justify-self: center;
+    width: 16px;
+}
+
+.workspace-create-form {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: 42px minmax(0, 1fr) 34px;
+}
+
+.workspace-create-form[hidden] {
+    display: none;
+}
+
+.workspace-icon-input,
+.workspace-name-input,
+.workspace-save-btn {
+    background-color: #121214;
+    border: 1px solid #3f3f46;
+    border-radius: 6px;
+    color: #e1e1e6;
+    min-height: 34px;
+}
+
+.workspace-icon-input,
+.workspace-name-input {
+    font-size: 0.82rem;
+    min-width: 0;
+    padding: 7px 8px;
+}
+
+.workspace-icon-input:focus,
+.workspace-name-input:focus,
+.workspace-save-btn:hover,
+.workspace-save-btn:focus {
+    border-color: #04d361;
+    outline: none;
+}
+
+.workspace-save-btn {
+    align-items: center;
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+}
+
+.workspace-save-btn svg {
+    height: 15px;
+    width: 15px;
+}
+
+.workspace-status {
+    color: #7c7c8a;
+    font-size: 0.74rem;
+    min-height: 0.9rem;
+}
+
+.workspace-status.error {
+    color: #f75a68;
+}
+
 .history-sidebar-header {
     align-items: center;
     border-bottom: 1px solid #29292e;
@@ -619,11 +810,30 @@ a.history-action-menu-item {
     transition: opacity 0.18s ease;
 }
 
-.chat-header h1 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #04d361; /* Verde estilo terminal hacker/moderno */
+.olliverse-logo {
+    align-items: center;
+    color: #00f576;
+    display: inline-flex;
+    font-family: sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    gap: 8px;
+    line-height: 1;
     white-space: nowrap;
+}
+
+.olliverse-logo svg {
+    flex: 0 0 28px;
+    height: 28px;
+    width: 28px;
+}
+
+.olliverse-logo-word {
+    color: #00f576;
+}
+
+.olliverse-logo-olli {
+    color: #ffffff;
 }
 
 .model-controls {
@@ -1360,6 +1570,23 @@ a.history-action-menu-item {
     white-space: nowrap;
 }
 
+.rag-status .rag-upload-progress {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    display: block;
+    height: 4px;
+    margin-top: 4px;
+    overflow: hidden;
+    width: min(180px, 100%);
+}
+
+.rag-status .rag-upload-progress-fill {
+    background: currentColor;
+    display: block;
+    height: 100%;
+    transition: width 0.16s ease;
+}
+
 .rag-status.error {
     color: #f75a68;
 }
@@ -1425,13 +1652,8 @@ a.config-btn {
     padding-bottom: 16px;
 }
 
-.documentation-kicker {
-    color: #04d361;
-    display: block;
-    font-size: 0.78rem;
-    font-weight: 700;
-    margin-bottom: 4px;
-    text-transform: uppercase;
+.documentation-logo {
+    margin-bottom: 6px;
 }
 
 .documentation-header h1 {
@@ -1742,11 +1964,40 @@ a.config-btn {
 .message-group.assistant {
     align-items: flex-start;
     align-self: flex-start;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    max-width: min(92%, 900px);
 }
 
 .message-group.error {
     align-items: center;
     align-self: center;
+}
+
+.message-avatar {
+    align-items: center;
+    display: inline-flex;
+    grid-column: 1;
+    height: 30px;
+    justify-content: center;
+    width: 30px;
+}
+
+.olliverse-message-avatar {
+    margin-top: 3px;
+}
+
+.olliverse-message-avatar svg {
+    display: block;
+    height: 24px;
+    width: 24px;
+}
+
+.message-group.assistant .message,
+.message-group.assistant .response-duration,
+.message-group.assistant .rag-source-info,
+.message-group.assistant .message-actions {
+    grid-column: 2;
 }
 
 .message {
@@ -1811,6 +2062,13 @@ a.config-btn {
 .message-action-btn svg {
     height: 16px;
     width: 16px;
+}
+
+.response-duration {
+    color: #8d8d99;
+    font-size: 0.76rem;
+    line-height: 1.2;
+    padding-left: 2px;
 }
 
 .message-action-btn::after {
@@ -2200,6 +2458,7 @@ a.config-btn {
     flex: 0 0 48px;
     height: 48px;
     justify-content: center;
+    position: relative;
     transition: background-color 0.2s;
     width: 48px;
 }
@@ -2222,6 +2481,33 @@ a.config-btn {
 .send-btn svg {
     height: 20px;
     width: 20px;
+}
+
+.send-btn.loading {
+    background-color: #04d361;
+    color: #0a0a0c;
+    cursor: wait;
+}
+
+.send-btn.loading svg {
+    opacity: 0;
+}
+
+.send-btn.loading::after {
+    animation: send-button-spin 0.75s linear infinite;
+    border: 2px solid rgba(10, 10, 12, 0.24);
+    border-top-color: #0a0a0c;
+    border-radius: 50%;
+    content: '';
+    height: 20px;
+    position: absolute;
+    width: 20px;
+}
+
+@keyframes send-button-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .modal-backdrop {

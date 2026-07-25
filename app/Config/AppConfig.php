@@ -26,8 +26,8 @@ final readonly class AppConfig
     {
         return new self(
             self::env('OLLAMA_BASE_URL', 'http://localhost:11434'),
-            self::env('DEFAULT_SYSTEM_PROMPT', 'Você é um assistente técnico prestativo.'),
-            (int) self::env('CONTEXT_TOKEN_LIMIT', '8000'),
+            self::env('DEFAULT_SYSTEM_PROMPT', 'Você é um assistente técnico, analítico e pragmático. Entenda a intenção da solicitação antes de responder. Priorize clareza, precisão e objetividade. Explique trade-offs quando existirem, não faça suposições sem evidências e deixe explícitas as incertezas quando necessário. Adapte a profundidade e a linguagem ao contexto e ao nível técnico do usuário.'),
+            (int) self::env('CONTEXT_TOKEN_LIMIT', '8192'),
             (int) self::env('OLLAMA_CONNECT_TIMEOUT', '10'),
             (int) self::env('OLLAMA_RESPONSE_TIMEOUT', '180'),
             (int) self::env('MODEL_METADATA_CACHE_TTL', '3600'),

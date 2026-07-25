@@ -9,7 +9,7 @@ Ela foi criada para transformar arquivos, conversas e perguntas soltas em trabal
 ## Por que usar
 
 - Trabalhe com IA local sem depender de uma plataforma externa para cada conversa.
-- Organize conversas em historico persistente, com busca e retomada rapida.
+- Organize conversas por workspaces, com historico persistente, busca e retomada rapida.
 - Use personas para adaptar tom, especialidade e objetivo do assistente.
 - Adicione documentos e pergunte sobre o conteudo deles sem sair do chat.
 - Gere graficos e sugestoes analiticas a partir de dados preparados.
@@ -26,7 +26,11 @@ A conversa fica no centro. Ao redor dela, os controles aparecem quando fazem sen
 
 ### Conversas com continuidade
 
-Cada chat fica salvo no SQLite local. Voce pode voltar a conversas anteriores, buscar no historico e continuar de onde parou sem perder contexto importante.
+Cada chat fica salvo no SQLite local e pertence ao workspace ativo. Voce pode voltar a conversas anteriores daquele espaco, buscar no historico e continuar de onde parou sem perder contexto importante.
+
+### Workspaces por contexto
+
+O seletor no topo da barra lateral separa projetos, estudos e fluxos de escrita em espacos independentes. Ao trocar de workspace, o historico e os documentos preparados para consulta mudam junto, evitando misturar arquivos e conversas de assuntos diferentes.
 
 ### Personas sob medida
 
@@ -41,6 +45,8 @@ O painel de documentos mostra arquivos adicionados, quantidade de fragmentos, da
 ### Analise visual de dados
 
 Com o plugin analitico, dados em documentos podem virar sugestoes de perguntas e graficos renderizados no proprio chat. A ferramenta ajuda a sair de uma planilha bruta para uma leitura visual mais rapida.
+
+Arquivos CSV e JSON preparados no workspace tambem viram tabelas analiticas locais. Quando o usuario pede insights, o Olliverse pode executar uma consulta estruturada antes de plotar o grafico, separando categoria e valor para evitar inversao de eixos.
 
 ### Exportacao pronta para compartilhar
 
@@ -67,7 +73,7 @@ Para estruturar ideias, consultar materiais, comparar informacoes, escrever melh
 ## Diferenciais
 
 1. **Privacidade local:** conversas, documentos e historico ficam no ambiente local do usuario.
-2. **Contexto controlado:** o usuario decide quais documentos entram na conversa.
+2. **Contexto controlado:** o usuario decide quais documentos entram na conversa, sempre dentro do workspace atual.
 3. **Produtividade acumulada:** historico, personas e documentos tornam o uso melhor com o tempo.
 4. **Interface compacta:** recursos avancados sem transformar a tela em um painel pesado.
 5. **Saida util:** respostas podem virar graficos, PDF, Markdown ou proximas perguntas.
@@ -75,4 +81,3 @@ Para estruturar ideias, consultar materiais, comparar informacoes, escrever melh
 ## O resultado
 
 Olliverse reduz o atrito entre perguntar, consultar arquivos, analisar dados e registrar conclusoes. Ele aproxima a IA local de um produto completo: privado, pratico, extensivel e pronto para acompanhar o trabalho real.
-

@@ -1,4 +1,3 @@
-/storage/*.sqlite
-/storage/*.sqlite-*
+/storage/
 /vendor/
 .DS_Store

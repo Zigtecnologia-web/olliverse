@@ -9,12 +9,12 @@ interface ConversationRepository
     public function chatId(): int;
 
     /**
-     * @return array<int, array<string, string>>
+     * @return array<int, array<string, mixed>>
      */
     public function messages(): array;
 
     /**
-     * @param array<int, array<string, string>> $messages
+     * @param array<int, array<string, mixed>> $messages
      */
     public function replaceMessages(array $messages): void;
 
@@ -30,7 +30,7 @@ interface ConversationRepository
     public function chatSummary(): ?array;
 
     /**
-     * @param array<int, array<string, string>> $messages
+     * @param array<int, array<string, mixed>> $messages
      */
     public function replaceConversation(array $messages, string $systemPrompt, string $model): bool;
 }

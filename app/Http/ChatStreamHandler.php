@@ -11,6 +11,7 @@ use App\Services\OllamaClient;
 use App\Services\OllamaStreamException;
 use App\Services\PluginManager;
 use App\Services\RagRetrievalService;
+use App\Services\WorkspaceAnalyticsService;
 use App\Support\ErrorMessage;
 use Throwable;
 
@@ -23,6 +24,7 @@ final readonly class ChatStreamHandler
         private ContextWindowService $contextWindowService,
         private ?RagRetrievalService $ragRetrievalService = null,
         private ?PluginManager $pluginManager = null,
+        private ?WorkspaceAnalyticsService $workspaceAnalyticsService = null,
     ) {
     }
 
@@ -90,7 +92,11 @@ final readonly class ChatStreamHandler
             $ragChunks = $ragEnabled && $this->ragRetrievalService !== null
                 ? $this->ragRetrievalService->retrieve($prompt, 3, $ragDocumentIds)
                 : [];
+            $analyticsContext = $ragEnabled && $this->workspaceAnalyticsService !== null
+                ? $this->workspaceAnalyticsService->chatContext($prompt, $selectedModel, $this->ollamaClient, $ragDocumentIds)
+                : '';
             $effectiveSystemPrompt = $this->ragRetrievalService?->augmentSystemPrompt($effectiveSystemPrompt, $ragChunks) ?? $effectiveSystemPrompt;
+            $effectiveSystemPrompt = $this->workspaceAnalyticsService?->augmentSystemPromptWithAnalytics($effectiveSystemPrompt, $analyticsContext) ?? $effectiveSystemPrompt;
             $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $effectiveSystemPrompt);
             $messagesForContext = $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages);
 
@@ -103,6 +109,8 @@ final readonly class ChatStreamHandler
                     'sources' => $this->ragRetrievalService->metadata($ragChunks),
                 ]);
             }
+
+            $responseStartedAt = microtime(true);
 
             try {
                 $assistantResponse = $this->ollamaClient->streamChat([
@@ -127,9 +135,11 @@ final readonly class ChatStreamHandler
                 exit;
             }
 
+            $responseDurationMs = (int) round((microtime(true) - $responseStartedAt) * 1000);
             $conversationMessages[] = [
                 'role' => 'assistant',
                 'content' => $assistantResponse,
+                'response_duration_ms' => $responseDurationMs,
             ];
 
             $contextWasTrimmed = $this->contextWindowService->trimExcess($conversationMessages, $systemPrompt) || $contextWasTrimmed;
@@ -146,6 +156,7 @@ final readonly class ChatStreamHandler
                     $this->contextWindowService->withSystemPrompt($effectiveSystemPrompt, $conversationMessages)
                 ),
                 'context_trimmed' => $contextWasTrimmed,
+                'response_duration_ms' => $responseDurationMs,
             ]);
 
             exit;

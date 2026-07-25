@@ -2,9 +2,16 @@
     background-color: #121214;
     border: 1px solid #323238;
     border-radius: 8px;
+    box-sizing: border-box;
     margin: 12px 0;
-    min-width: min(520px, 100%);
+    max-width: 720px;
+    min-width: 0;
     overflow: hidden;
+    width: 100%;
+}
+
+.message-group.assistant > .plugin-chart-wrapper {
+    grid-column: 2;
 }
 
 .plugin-chart-wrapper:last-child {
@@ -31,6 +38,7 @@
 }
 
 .chart-canvas-container {
+    box-sizing: border-box;
     height: 280px;
     padding: 14px;
     position: relative;

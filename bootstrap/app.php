@@ -53,7 +53,8 @@ $vectorSimilarityService = new VectorSimilarityService();
 $documentChunkRepository = new SqliteDocumentChunkRepository($pdo, $vectorSimilarityService);
 $modelMetadataService = new ModelMetadataService(
     $ollamaClient,
-    $config->modelMetadataCacheTtl
+    $config->modelMetadataCacheTtl,
+    $config->contextTokenLimit
 );
 $promptGeneratorService = new PromptGeneratorService($ollamaClient);
 $ragIngestionService = new RagIngestionService(

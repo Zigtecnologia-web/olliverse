@@ -9,6 +9,11 @@ use RuntimeException;
 
 final readonly class SqlitePersonaRepository
 {
+    private const BASE_PERSONA_NAME = 'Assistente Geral';
+    private const BASE_PERSONA_DESCRIPTION = 'Configuração padrão para tarefas gerais.';
+    private const BASE_PERSONA_PROMPT = 'Você é um assistente técnico, analítico e pragmático. Entenda a intenção da solicitação antes de responder. Priorize clareza, precisão e objetividade. Explique trade-offs quando existirem, não faça suposições sem evidências e deixe explícitas as incertezas quando necessário. Adapte a profundidade e a linguagem ao contexto e ao nível técnico do usuário.';
+    private const DUPLICATE_NAME_MESSAGE = 'Já existe uma persona com esse nome. Escolha um nome diferente.';
+
     public function __construct(
         private PDO $pdo,
         private string $defaultPrompt,
@@ -111,6 +116,8 @@ final readonly class SqlitePersonaRepository
             throw new RuntimeException('O prompt da persona não pode ficar vazio.');
         }
 
+        $this->assertUniqueName($name);
+
         $now = $this->now();
         $statement = $this->pdo->prepare(
             'INSERT INTO personas (name, description, prompt_content, is_public, created_at, updated_at)
@@ -150,6 +157,12 @@ final readonly class SqlitePersonaRepository
             throw new RuntimeException('O prompt da persona não pode ficar vazio.');
         }
 
+        if ($this->isBasePersona($persona)) {
+            $this->assertBasePersonaPurpose($name, $description);
+        }
+
+        $this->assertUniqueName($name, $personaId);
+
         $statement = $this->pdo->prepare(
             'UPDATE personas
              SET name = :name, description = :description, prompt_content = :prompt_content, updated_at = :updated_at
@@ -179,7 +192,7 @@ final readonly class SqlitePersonaRepository
 
         $fallback = $this->fallbackPersona();
 
-        if ((int) $fallback['id'] === $personaId) {
+        if ((int) $fallback['id'] === $personaId || $this->isBasePersona($persona)) {
             throw new RuntimeException('A persona padrão não pode ser excluída.');
         }
 
@@ -257,21 +270,20 @@ final readonly class SqlitePersonaRepository
      */
     private function fallbackPersona(): array
     {
-        $statement = $this->pdo->prepare(
+        $statement = $this->pdo->query(
             'SELECT id, name, description, prompt_content, is_public
              FROM personas
-             WHERE prompt_content = :prompt_content
-             ORDER BY id ASC
-             LIMIT 1'
+             ORDER BY id ASC'
         );
-        $statement->execute(['prompt_content' => $this->defaultPrompt]);
-        $persona = $statement->fetch();
+        $baseName = $this->normalizePersonaName(self::BASE_PERSONA_NAME);
 
-        if (is_array($persona)) {
-            return $this->formatPersona($persona);
+        foreach ($statement->fetchAll() as $persona) {
+            if ($this->normalizePersonaName((string) ($persona['name'] ?? '')) === $baseName) {
+                return $this->formatPersona($persona);
+            }
         }
 
-        return $this->create('Assistente técnico prestativo', 'Persona padrão do Olliverse.', $this->defaultPrompt);
+        return $this->createBasePersona();
     }
 
     /**
@@ -327,5 +339,110 @@ final readonly class SqlitePersonaRepository
     private function now(): string
     {
         return date('Y-m-d H:i:s');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function createBasePersona(): array
+    {
+        $existing = $this->findByNormalizedName(self::BASE_PERSONA_NAME);
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $now = $this->now();
+        $statement = $this->pdo->prepare(
+            'INSERT INTO personas (name, description, prompt_content, is_public, created_at, updated_at)
+             VALUES (:name, :description, :prompt_content, 1, :created_at, :updated_at)'
+        );
+        $statement->execute([
+            'name' => self::BASE_PERSONA_NAME,
+            'description' => self::BASE_PERSONA_DESCRIPTION,
+            'prompt_content' => self::BASE_PERSONA_PROMPT,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        return $this->find((int) $this->pdo->lastInsertId()) ?? [
+            'id' => 0,
+            'name' => self::BASE_PERSONA_NAME,
+            'description' => self::BASE_PERSONA_DESCRIPTION,
+            'prompt_content' => self::BASE_PERSONA_PROMPT,
+            'is_public' => true,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findByNormalizedName(string $name): ?array
+    {
+        $normalizedName = $this->normalizePersonaName($name);
+        $statement = $this->pdo->query(
+            'SELECT id, name, description, prompt_content, is_public
+             FROM personas
+             ORDER BY id ASC'
+        );
+
+        foreach ($statement->fetchAll() as $persona) {
+            if ($this->normalizePersonaName((string) ($persona['name'] ?? '')) === $normalizedName) {
+                return $this->formatPersona($persona);
+            }
+        }
+
+        return null;
+    }
+
+    private function assertUniqueName(string $name, ?int $ignorePersonaId = null): void
+    {
+        $normalizedName = $this->normalizePersonaName($name);
+        $statement = $this->pdo->query('SELECT id, name FROM personas');
+
+        foreach ($statement->fetchAll() as $persona) {
+            $personaId = (int) ($persona['id'] ?? 0);
+
+            if ($ignorePersonaId !== null && $personaId === $ignorePersonaId) {
+                continue;
+            }
+
+            if ($this->normalizePersonaName((string) ($persona['name'] ?? '')) === $normalizedName) {
+                throw new RuntimeException(self::DUPLICATE_NAME_MESSAGE);
+            }
+        }
+    }
+
+    private function assertBasePersonaPurpose(string $name, string $description): void
+    {
+        if ($this->normalizePersonaName($name) !== $this->normalizePersonaName(self::BASE_PERSONA_NAME)
+            || trim($description) !== self::BASE_PERSONA_DESCRIPTION
+        ) {
+            throw new RuntimeException('A persona padrão não pode ter nome ou descrição alterados.');
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $persona
+     */
+    private function isBasePersona(array $persona): bool
+    {
+        return (bool) ($persona['is_public'] ?? false)
+            || $this->normalizePersonaName((string) ($persona['name'] ?? '')) === $this->normalizePersonaName(self::BASE_PERSONA_NAME);
+    }
+
+    private function normalizePersonaName(string $name): string
+    {
+        $name = strtr(trim($name), [
+            'Á' => 'A', 'À' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'A', 'á' => 'a', 'à' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a',
+            'É' => 'E', 'È' => 'E', 'Ê' => 'E', 'Ë' => 'E', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'Í' => 'I', 'Ì' => 'I', 'Î' => 'I', 'Ï' => 'I', 'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
+            'Ó' => 'O', 'Ò' => 'O', 'Ô' => 'O', 'Õ' => 'O', 'Ö' => 'O', 'ó' => 'o', 'ò' => 'o', 'ô' => 'o', 'õ' => 'o', 'ö' => 'o',
+            'Ú' => 'U', 'Ù' => 'U', 'Û' => 'U', 'Ü' => 'U', 'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+            'Ç' => 'C', 'ç' => 'c', 'Ñ' => 'N', 'ñ' => 'n',
+        ]);
+        $transliterated = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name) : false;
+
+        return strtolower($transliterated === false ? $name : $transliterated);
     }
 }

@@ -78,7 +78,7 @@ A ferramenta tem perfil de **cliente local privado**, com baixa dependencia exte
 - Endpoint principal usado: `/api/chat`.
 - Endpoint de geracao rapida de texto usado: `/api/generate`.
 - Endpoint de listagem de modelos: `/api/tags`.
-- Comando local usado para metadados: `ollama show --verbose`.
+- Endpoint de metadados de modelo: `/api/show`.
 - Web AI experimental no navegador via WebGPU/WebLLM carregado sob demanda a partir do bundle local.
 
 ## 4. Estrutura de pastas
@@ -163,8 +163,8 @@ Valores suportados por ambiente:
 | Variavel | Padrao | Finalidade |
 |---|---:|---|
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL base do Ollama |
-| `DEFAULT_SYSTEM_PROMPT` | `Voce e um assistente tecnico prestativo.` | Prompt padrao |
-| `CONTEXT_TOKEN_LIMIT` | `8000` | Limite estimado da janela de contexto |
+| `DEFAULT_SYSTEM_PROMPT` | Prompt da persona `Assistente Geral` | Prompt padrao |
+| `CONTEXT_TOKEN_LIMIT` | `8192` | Fallback estimado da janela de contexto quando o Ollama nao informa o limite do modelo |
 | `OLLAMA_CONNECT_TIMEOUT` | `10` | Timeout de conexao com Ollama |
 | `OLLAMA_RESPONSE_TIMEOUT` | `180` | Timeout maximo da resposta |
 | `MODEL_METADATA_CACHE_TTL` | `3600` | Tempo de cache dos metadados do modelo |
@@ -228,6 +228,8 @@ Cada linha enviada pelo backend e um JSON independente. Os tipos atuais sao:
 
 O streaming evita que o usuario precise esperar a resposta inteira ficar pronta.
 
+Ao concluir uma resposta do modelo, a aplicacao registra a duracao total da entrega e mostra abaixo da mensagem algo como `Resposta entregue em 4,2s`.
+
 No frontend, `chat-stream.js` usa:
 
 - `response.body.getReader()`;
@@ -243,11 +245,14 @@ As conversas sao persistidas no SQLite.
 
 Tabelas principais:
 
+- `workspaces`;
 - `chats`;
 - `messages`;
 - `personas`.
 
-A conversa atual e identificada por `chat_id` na URL.
+As respostas do assistente podem armazenar `messages.response_duration_ms`, usado para manter visivel no historico quanto tempo a resposta levou para ser entregue por inteiro.
+
+A conversa atual e identificada por `chat_id` na URL e tambem fica vinculada ao workspace ativo.
 
 Exemplo:
 
@@ -255,9 +260,21 @@ Exemplo:
 /index.php?chat_id=1
 ```
 
-Se o `chat_id` nao existir, a aplicacao cria automaticamente uma nova conversa e redireciona para ela.
+Se o `chat_id` nao existir no workspace ativo, a aplicacao cria automaticamente uma nova conversa e redireciona para ela.
 
-### 8.3.1 Historico inteligente
+### 8.3.1 Workspaces
+
+A barra lateral possui um seletor de workspace no topo. Cada workspace tem nome, icone curto e seu proprio conjunto de conversas e documentos preparados para RAG.
+
+Fluxo geral:
+
+1. a aplicacao garante um workspace padrao `Geral` durante a migracao;
+2. conversas antigas sem `workspace_id` sao associadas ao workspace padrao;
+3. documentos RAG antigos tambem sao associados ao workspace padrao;
+4. ao trocar de workspace, o frontend recebe novo chat ativo, historico filtrado, documentos daquele workspace, persona ativa e uso de contexto;
+5. se o workspace escolhido ainda nao tiver conversas, o backend cria uma conversa inicial para ele.
+
+### 8.3.2 Historico inteligente
 
 A barra lateral de historico possui busca instantanea. O frontend chama `GET ?action=search_history&q=...` enquanto o usuario digita e renderiza as conversas retornadas, sem recarregar a pagina.
 
@@ -325,8 +342,9 @@ O backend:
 
 - valida se o modelo existe;
 - chama `ModelMetadataService`;
-- tenta executar `ollama show --verbose`;
-- extrai informacoes por regex;
+- consulta o Ollama via `POST /api/show`;
+- extrai `context_length` de `model_info` ou `num_ctx` de `parameters`/`modelfile`;
+- devolve `CONTEXT_TOKEN_LIMIT` como fallback quando o teto real nao vier na resposta;
 - usa `/api/tags` como fallback para tamanho;
 - guarda o resultado em cache na sessao por `MODEL_METADATA_CACHE_TTL`.
 
@@ -359,12 +377,11 @@ Regras desse fluxo:
 
 O tooltip do botao **Gerar** reutiliza o tooltip flutuante de `message-ui.js`, renderizado no `document.body`, para nao ficar preso atras da modal.
 
-Personas padrao semeadas automaticamente:
+Persona Base semeada automaticamente:
 
-- Assistente tecnico prestativo;
-- Assistente de Codigo;
-- Escritor;
-- Analista de Dados.
+- `Assistente Geral`.
+
+A Persona Base sempre fica disponivel, nao pode ser excluida e substitui as antigas personas publicas semeadas pelo sistema. Personas criadas pelo usuario continuam podendo existir ao lado dela.
 
 ### 8.8 Troca de persona durante a conversa
 
@@ -392,7 +409,8 @@ Validacoes atuais:
 - nome nao pode ficar vazio;
 - prompt da persona nao pode ficar vazio;
 - persona inexistente gera erro;
-- a persona fallback/padrao nao pode ser excluida no backend.
+- a persona fallback/padrao nao pode ser excluida no backend;
+- nomes de personas nao podem ser duplicados, comparando maiusculas, minusculas, acentos e espacos nas extremidades.
 
 Ao editar uma persona que esta associada a chats, o sistema atualiza o `system_prompt` dos chats vinculados.
 
@@ -604,15 +622,16 @@ Importante: marcar um documento nao prepara arquivos novos. Para aparecer na lis
 
 O fluxo de preparo funciona assim:
 
-1. o usuario seleciona um arquivo de texto ou planilha `.xlsx`/`.xls`;
+1. o usuario seleciona um arquivo de texto, CSV ou planilha `.xlsx`/`.xls`;
 2. se for planilha, o navegador converte as abas em texto tabular antes do envio;
-3. o backend le o conteudo textual;
-4. o texto e dividido em pedacos pequenos, chamados chunks;
-5. cada chunk e enviado ao Ollama para gerar embedding;
-6. o chunk e o embedding sao salvos na tabela `document_chunks`;
-7. em perguntas futuras, esses chunks podem ser recuperados por similaridade.
+3. arquivos pequenos seguem para `POST ?action=rag_ingest`;
+4. CSVs maiores que o lote configurado no navegador sao fatiados com `File.slice()` e enviados sequencialmente para `POST ?action=rag_chunk_upload`;
+5. no upload em lotes, o backend salva partes temporarias em `storage/chunk_uploads`, junta o arquivo final e processa o CSV por streaming;
+6. linhas CSV com quantidade de colunas diferente do cabecalho sao ignoradas;
+7. o backend registra uma amostra do CSV no RAG e cria/atualiza o dataset analitico do documento;
+8. em perguntas futuras, os chunks podem ser recuperados por similaridade e os dados tabulares podem ser consultados pela camada analitica.
 
-Arquivos `.txt`, `.csv`, `.json` e outros textos continuam seguindo o upload normal. Arquivos `.xlsx` e `.xls` sao processados no navegador com SheetJS: cada aba com conteudo vira uma secao textual com o nome do arquivo, o nome da aba e linhas em formato CSV. O endpoint `POST ?action=rag_ingest` continua recebendo apenas texto plano.
+Arquivos `.txt`, `.json` e CSVs pequenos continuam seguindo o upload normal. CSVs grandes usam upload em lotes para contornar `post_max_size`. Arquivos `.xlsx` e `.xls` sao processados no navegador com SheetJS: cada aba com conteudo vira uma secao textual com o nome do arquivo, o nome da aba e linhas em formato CSV. O endpoint `POST ?action=rag_ingest` continua recebendo apenas texto plano.
 
 O Ollama possui funcionalidade propria para gerar embeddings. Neste projeto, essa chamada e feita pelo backend usando:
 
@@ -663,7 +682,114 @@ the input length exceeds the context length
 
 Esse erro acontece quando um trecho enviado ao modelo ficou maior que a janela de contexto permitida pelo modelo de embeddings.
 
-### 8.22 Central de Documentacao
+### 8.22 RAG e DuckDB trabalhando juntos
+
+O RAG e o DuckDB resolvem problemas diferentes. O RAG encontra **trechos de texto relevantes** para a pergunta. O DuckDB calcula **respostas estruturadas** sobre dados tabulares, como CSV e JSON.
+
+Em termos simples:
+
+- **RAG** ajuda a IA a lembrar e localizar contexto textual.
+- **DuckDB** ajuda a aplicacao a contar, somar, agrupar, ordenar e calcular dados com SQL.
+- **Ollama/modelo de chat** interpreta a pergunta, explica o resultado e escreve a resposta final.
+- **SQLite da aplicacao** continua guardando chats, mensagens, documentos, chunks, embeddings e metadados.
+
+#### 8.22.1 Quando um documento e adicionado
+
+1. O usuario adiciona um arquivo pela interface.
+2. O backend cria ou atualiza um registro em `rag_documents`.
+3. O conteudo textual e dividido em chunks pelo `RagChunkerService`.
+4. Cada chunk recebe embedding pelo Ollama, usando o modelo configurado em `RAG_EMBEDDING_MODEL`.
+5. Os chunks e embeddings sao salvos em `document_chunks`.
+6. Se o arquivo for estruturado, como `.csv` ou `.json`, o `StructuredDataParser` tambem transforma o conteudo em colunas e linhas normalizadas.
+7. O `WorkspaceAnalyticsService` salva o metadado desse dataset em `analytics_datasets`.
+8. Se `pdo_duckdb` estiver disponivel, o mesmo dataset vira uma tabela real no DuckDB em `storage/analytics/workspace_<id>.duckdb`.
+
+Resultado: um CSV/JSON preparado passa a ter duas leituras complementares. O RAG guarda uma amostra textual para recuperacao semantica, e o DuckDB guarda uma tabela consultavel por SQL.
+
+#### 8.22.2 Quando o usuario pergunta sobre documentos no chat
+
+1. O usuario marca um ou mais documentos na gaveta **Resumo**.
+2. O usuario envia uma pergunta no chat.
+3. O `ChatStreamHandler` identifica que existem documentos ativos.
+4. O RAG gera embedding da pergunta e busca os chunks mais parecidos em `document_chunks`.
+5. Em paralelo, o `WorkspaceAnalyticsService` verifica se os documentos ativos possuem dataset estruturado em `analytics_datasets`.
+6. Se houver dataset estruturado, o modelo recebe apenas catalogo, colunas, nome da tabela e amostras, e gera um `SELECT` seguro.
+7. O backend valida que a query e somente `SELECT` e que usa uma tabela permitida.
+8. A query roda no DuckDB persistente do workspace.
+9. O resultado estruturado da consulta e adicionado ao system prompt junto com os trechos recuperados pelo RAG.
+10. O Ollama gera a resposta final usando a conversa, os trechos do RAG e o resultado calculado pelo DuckDB.
+
+Esse uso do DuckDB so acontece quando existem documentos selecionados e quando pelo menos um deles tem dataset estruturado. Perguntas sem documentos ativos continuam no fluxo normal do chat.
+
+#### 8.22.3 Quem faz o que
+
+| Parte | Responsabilidade |
+|---|---|
+| `RagIngestionService` | prepara o documento para RAG e salva chunks com embeddings |
+| `RagRetrievalService` | busca os chunks mais parecidos com a pergunta |
+| `StructuredDataParser` | transforma CSV/JSON em colunas e linhas normalizadas |
+| `WorkspaceAnalyticsService` | registra datasets, cria tabelas DuckDB, executa SQL e monta contexto analitico |
+| DuckDB | executa consultas analiticas sobre dados tabulares do workspace |
+| SQLite | persiste estado da aplicacao, metadados, chunks e historico |
+| Ollama | gera embeddings, escolhe SQL quando necessario e escreve a resposta final |
+
+#### 8.22.4 Exemplos praticos
+
+Pergunta textual:
+
+```text
+Explique o que esse documento diz sobre evasao escolar.
+```
+
+Nesse caso, o RAG tende a ser o principal caminho. Ele procura trechos semanticamente parecidos e injeta esses trechos no contexto da resposta.
+
+Pergunta analitica:
+
+```text
+Quantos alunos existem por serie?
+```
+
+Se o documento ativo for uma tabela com coluna `serie`, o DuckDB pode receber uma consulta como:
+
+```sql
+SELECT serie, COUNT(*) AS total
+FROM dataset_12_alunos
+GROUP BY serie
+ORDER BY total DESC
+LIMIT 40
+```
+
+O modelo nao precisa contar linhas dentro do prompt. Ele recebe o resultado ja calculado e apenas explica a resposta.
+
+Pergunta mista:
+
+```text
+Qual serie concentra mais alunos e o que os dados sugerem?
+```
+
+Nesse caso, o DuckDB calcula o ranking por serie, enquanto o RAG pode fornecer trechos textuais ou amostras que ajudam a contextualizar a explicacao.
+
+#### 8.22.5 O que melhora na aplicacao
+
+- **Mais precisao numerica:** contagens, somas, medias e rankings saem de SQL local, nao de estimativa do modelo.
+- **Menos tokens no prompt:** o chat recebe resultado resumido em vez de receber uma tabela grande inteira.
+- **Melhor desempenho em dados tabulares:** DuckDB e otimizado para consultas analiticas, especialmente `GROUP BY`, `ORDER BY`, `COUNT`, `SUM` e `AVG`.
+- **Menos repeticao de trabalho:** os dados ficam persistidos por workspace em DuckDB, evitando recriar a tabela a cada consulta.
+- **Respostas mais confiaveis:** o modelo interpreta um resultado estruturado, reduzindo risco de inverter eixo, contar errado ou inventar valores.
+- **Fluxo unico para o usuario:** o usuario so marca o documento e pergunta; a aplicacao decide quando usar RAG, DuckDB ou os dois.
+
+#### 8.22.6 Regra mental do fluxo
+
+Use esta regra para entender o comportamento:
+
+```text
+Texto livre ou explicacao -> RAG
+Tabela, contagem, soma, media, ranking ou grafico -> DuckDB
+Pergunta com texto e numeros -> RAG + DuckDB
+Sem documento selecionado -> chat normal
+```
+
+### 8.23 Central de Documentacao
 
 A aplicacao possui uma Central de Documentacao acessivel pelo botao de livro no menu principal do chat.
 
@@ -681,7 +807,7 @@ Fluxo:
 
 O arquivo `Doc/README.md` continua sendo a fonte canonica da documentacao funcional e tecnica.
 
-### 8.23 Plugins e graficos
+### 8.24 Plugins e graficos
 
 A aplicacao possui uma arquitetura inicial de plugins em `plugins/`.
 
@@ -689,7 +815,7 @@ Cada plugin pode ter:
 
 - `manifest.json` com metadados, dependencias e descricao;
 - `includes/prompt.php` com instrucao adicional para o system prompt;
-- `includes/inspect_prompt.php` e `includes/insights_view.php` para inspecao analitica baseada em RAG;
+- `includes/inspect_prompt.php` e `includes/insights_view.php` para inspecao analitica baseada em RAG ou tabelas locais;
 - `assets/style.css` com estilos isolados;
 - `assets/script.js` com comportamento proprio do plugin.
 
@@ -708,12 +834,15 @@ Quando o plugin esta ligado:
 3. o frontend tambem recebe esses prompts em `activePluginPrompts` para orientar respostas da Web AI;
 4. o frontend carrega Chart.js local em `public/vendor/chart.js/chart.umd.js` e os assets do plugin sob demanda;
 5. o prompt do plugin orienta a IA a responder com analise textual e tabelas Markdown legiveis, nao com JSON cru;
-6. quando uma resposta do assistente contem uma tabela com categorias e valores numericos, o frontend exibe o botao **Plotar grafico** no rodape da mensagem;
-7. ao clicar em **Plotar grafico**, o plugin extrai os dados da tabela ja renderizada e cria um card Chart.js sem nova chamada ao Ollama;
-8. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
-9. o controle compacto **Resumo** aparece quando ha documentos adicionados e abre a gaveta lateral sem chamar IA automaticamente; dentro dela ficam a selecao de documentos ativos e o botao **Gerar insights**, que analisa os documentos marcados e abre um popover de sugestoes rapidas;
-10. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
-11. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos de grafico por imagens estaticas.
+6. arquivos `.csv` e `.json` adicionados ao workspace tambem sao registrados como datasets em `analytics_datasets`;
+7. quando a inspecao encontra dataset estruturado, o modelo sugere consultas `SELECT` usando o nome da tabela local;
+8. ao clicar em um chip com SQL, o frontend chama `POST ?action=data_query`, recebe um payload com `query_executed` e `chart_config`, e renderiza o grafico diretamente no chat;
+9. quando uma resposta do assistente contem uma tabela com categorias e valores numericos, o frontend exibe o botao **Plotar grafico** no rodape da mensagem;
+10. ao clicar em **Plotar grafico**, o plugin extrai os dados da tabela ja renderizada e cria um card Chart.js sem nova chamada ao Ollama;
+11. cada card de grafico recebe um seletor local para alternar entre barras, pizza, linhas e tabela sem nova chamada ao Ollama;
+12. o controle compacto **Resumo** aparece quando ha documentos adicionados e abre a gaveta lateral sem chamar IA automaticamente; dentro dela ficam a selecao de documentos ativos e o botao **Gerar insights**, que analisa os documentos marcados e abre um popover de sugestoes rapidas;
+13. abaixo do grafico, o botao **Baixar imagem** gera um arquivo PNG do grafico renderizado;
+14. ao exportar a conversa atual em PDF, o frontend envia os canvases ativos como PNG base64 para que o relatorio substitua os blocos de grafico por imagens estaticas.
 
 O fluxo de inspecao opcional usa `plugins/data_analyst/includes/inspect_prompt.php`.
 
@@ -721,12 +850,18 @@ Quando o plugin esta ativo, o controle **Resumo** aparece se existir pelo menos 
 
 1. o usuario clica em **Gerar insights**;
 2. o frontend chama `POST /index.php?action=data_insights`;
-3. o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
-4. a resposta do modelo precisa conter um JSON com `summary` e `suggestions`;
-5. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_rag_sample']`;
-6. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
-7. o frontend renderiza o resumo na gaveta lateral e replica os chips no popover de sugestoes;
-8. cada chip dispara uma pergunta normal do chat pedindo uma tabela Markdown com os documentos ativos.
+3. o backend procura primeiro datasets estruturados em `analytics_datasets`;
+4. quando existe dataset estruturado, o modelo recebe `document_id`, `table_name`, colunas e amostras e deve devolver sugestoes com `sql`;
+5. quando nao existe dataset estruturado, o backend recupera uma amostra dos chunks em `document_chunks` no SQLite;
+6. a resposta do modelo precisa conter um JSON com `summary` e `suggestions`;
+7. a amostra analisada fica guardada em `$_SESSION['olliverse_data_analyst_dataset']` ou `$_SESSION['olliverse_data_analyst_rag_sample']`;
+8. o `PluginManager` injeta essa base como contexto adicional enquanto o plugin estiver ativo;
+9. o frontend renderiza o resumo na gaveta lateral e replica os chips no popover de sugestoes;
+10. chips com SQL executam a consulta local e renderizam o grafico; chips sem SQL disparam uma pergunta normal do chat pedindo uma tabela Markdown com os documentos ativos.
+
+A camada analitica usa `App\Services\WorkspaceAnalyticsService`. O contrato executa consultas no DuckDB quando a extensao `pdo_duckdb` esta disponivel: arquivos estruturados viram datasets por workspace, sao gravados em `storage/analytics/workspace_<id>.duckdb`, consultas sao `SELECT` e o resultado para grafico separa explicitamente eixo X (`labels`) e eixo Y (`datasets[0].data`). Sem `pdo_duckdb`, o servico usa tabelas temporarias em SQLite como fallback local para manter o fluxo funcional.
+
+Quando o usuario pergunta no chat com documentos ativos, o backend tambem verifica se os documentos selecionados possuem dataset estruturado. Se houver, o modelo gera uma consulta `SELECT` segura a partir da pergunta, o backend executa essa consulta no DuckDB e injeta o resultado estruturado no contexto antes de chamar o chat. Esse uso so acontece quando ha documento indexado/selecionado.
 
 O prompt do plugin funciona como uma regra nativa de preparacao de dados para grafico. Antes de montar a tabela Markdown, o modelo deve inferir:
 
@@ -752,7 +887,9 @@ Contrato esperado para tabelas geradas pela IA:
 | Label 2 | 25 |
 ```
 
-O frontend procura tabelas Markdown renderizadas com pelo menos uma coluna textual/categorica e uma coluna numerica. Quando encontra uma tabela plotavel, injeta o botao **Plotar grafico** no rodape do balao da mensagem. O clique converte localmente as linhas da tabela em `labels` e `data`, sugere o tipo inicial do grafico e cria o card interativo.
+O frontend procura tabelas Markdown renderizadas com pelo menos uma coluna textual/categorica e uma coluna numerica. Como tolerancia defensiva para respostas imperfeitas do modelo, tambem recupera tabelas ASCII/`plaintext` com bordas `+---+`, mas o contrato principal continua sendo tabela Markdown. Quando encontra uma tabela plotavel, injeta o botao **Plotar grafico** no rodape do balao da mensagem. O clique converte localmente as linhas da tabela em `labels` e `data`, sugere o tipo inicial do grafico e cria o card interativo.
+
+Para consultas vindas de `data_query`, a query deve retornar a coluna de categoria primeiro e a metrica numerica em seguida. Isso evita inversao de eixos: por exemplo, `SELECT ano, salario FROM dataset_1_salarios ORDER BY ano ASC` gera `labels` com anos e `data` com salarios.
 
 Depois que um grafico e renderizado, o frontend guarda o payload normalizado no proprio card e permite alternar a visualizacao instantaneamente entre:
 
@@ -769,7 +906,7 @@ Antes de entregar os dados ao Chart.js, o plugin converte valores em formato num
 
 O frontend tambem recupera alguns formatos imperfeitos comuns gerados pela IA, como blocos JSON soltos depois de um rotulo `json`, chaves com espacos (`" dados"`) e residuos visuais do highlighter (`class="code-number">`). Quando recebe uma lista de objetos com uma coluna de nome/grupo e varias metricas numericas, o plugin monta um grafico comparativo com datasets por grupo.
 
-### 8.24 Modo Foco
+### 8.25 Modo Foco
 
 A interface possui um **Modo Foco** para leitura de respostas longas, blocos de codigo, tabelas e graficos.
 
@@ -870,11 +1007,12 @@ Resposta esperada:
   "size_gb": 2.0,
   "family": "llama",
   "context_length": 8192,
+  "context_fallback": false,
   "quantization": "Q4_K_M"
 }
 ```
 
-Campos podem vir como `null` quando o dado nao for encontrado.
+`context_length` sempre vem preenchido. Quando o Ollama nao retorna o teto real, o backend usa o fallback de `CONTEXT_TOKEN_LIMIT` e marca `context_fallback` como `true`. Os demais campos podem vir como `null` quando o dado nao for encontrado.
 
 ### 9.7 Exportar conversa em Markdown
 
@@ -948,6 +1086,8 @@ persona_action=create&name=Nome&description=Descricao&prompt_content=Prompt
 
 Cria a persona e a define como ativa no chat atual.
 
+Se o nome ja existir, mesmo com diferenca apenas de maiusculas, minusculas, acentos ou espacos nas extremidades, o backend responde `422` com `Já existe uma persona com esse nome. Escolha um nome diferente.`
+
 ### 9.12 Atualizar persona
 
 ```http
@@ -959,6 +1099,8 @@ persona_action=update&persona_id=2&name=Nome&description=Descricao&prompt_conten
 
 Atualiza a persona. Se ela for a persona ativa do chat atual, o chat passa a usar o prompt atualizado.
 
+A validacao de nome duplicado usa a mesma regra da criacao. A Persona Base nao pode ter nome ou descricao alterados.
+
 ### 9.13 Excluir persona
 
 ```http
@@ -968,7 +1110,7 @@ Content-Type: application/x-www-form-urlencoded
 persona_action=delete&persona_id=2
 ```
 
-Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a persona fallback.
+Remove a persona, desde que ela nao seja a fallback padrao. Chats que usavam essa persona sao movidos para a Persona Base.
 
 ### 9.14 Gerar system prompt de persona com IA
 
@@ -1081,7 +1223,54 @@ document_id=1
 
 O backend remove o documento de `rag_documents` e todos os chunks vinculados em `document_chunks`. Os endpoints antigos `action=rag_documents` e `action=rag_delete` continuam funcionando como aliases internos.
 
-### 9.19 Inspecionar dados para sugestoes analiticas
+### 9.19 Upload CSV em lotes
+
+```http
+POST /index.php?action=rag_chunk_upload
+Content-Type: multipart/form-data
+
+upload_id=upload_abc123
+file_name=base-grande.csv
+chunk_index=0
+total_chunks=58
+chunk=<blob csv parcial>
+```
+
+Resposta intermediaria:
+
+```json
+{
+  "success": true,
+  "complete": false,
+  "received": 1,
+  "total": 58
+}
+```
+
+Resposta do ultimo lote:
+
+```json
+{
+  "success": true,
+  "complete": true,
+  "document": {
+    "id": 12,
+    "source_name": "base-grande.csv",
+    "chunks": 1
+  },
+  "analytics_dataset": {
+    "source_name": "base-grande.csv",
+    "table_name": "dataset_12_base_grande",
+    "row_count": 5000,
+    "engine": "duckdb-pdo"
+  },
+  "documents": []
+}
+```
+
+O frontend usa `File.slice()` em lotes de aproximadamente 1,5 MB para ficar abaixo de limites comuns de `post_max_size`. O backend aceita apenas CSV nesse fluxo, salva chunks temporarios, junta o arquivo final e processa o CSV por streaming. O dataset analitico guarda ate o limite operacional atual de linhas normalizadas, ignorando linhas corrompidas ou incompletas.
+
+### 9.20 Inspecionar dados para sugestoes analiticas
 
 ```http
 POST /index.php?action=data_insights
@@ -1102,7 +1291,9 @@ Resposta esperada:
       {
         "title": "Alunos por serie",
         "query": "Gere um grafico por serie usando a quantidade de alunos.",
-        "chart_type": "bar"
+        "chart_type": "bar",
+        "document_id": 12,
+        "sql": "SELECT serie, COUNT(*) AS total FROM dataset_12_alunos GROUP BY serie ORDER BY total DESC"
       }
     ]
   }
@@ -1110,6 +1301,42 @@ Resposta esperada:
 ```
 
 O endpoint nao recebe upload novo. Ele usa apenas os IDs enviados em `rag_document_ids[]`, consultando os documentos ja preparados em `rag_documents` e `document_chunks`. Na interface, ele so e chamado quando o plugin de dados esta ativo, ha documentos ativos e o usuario clica em **Gerar insights**.
+
+Quando o documento selecionado tem dataset estruturado em `analytics_datasets`, a resposta tambem pode conter `datasets`, `engine` e sugestoes com `document_id` e `sql`. O campo `engine` retorna `duckdb-pdo` quando o driver DuckDB esta disponivel e `sqlite-fallback` quando o app esta usando o fallback local. Quando nao tem dataset estruturado, o endpoint mantém o fluxo RAG anterior e as sugestoes nao precisam de SQL.
+
+### 9.21 Executar consulta analitica local
+
+```http
+POST /index.php?action=data_query
+Content-Type: application/x-www-form-urlencoded
+
+document_id=12&chart_type=bar&title=Alunos%20por%20serie&sql=SELECT%20serie,%20COUNT(*)%20AS%20total%20FROM%20dataset_12_alunos%20GROUP%20BY%20serie
+```
+
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "payload": {
+    "status": "success",
+    "engine": "duckdb-pdo",
+    "query_executed": "SELECT serie, COUNT(*) AS total FROM dataset_12_alunos GROUP BY serie",
+    "rows": [
+      {"serie": "6 ano", "total": 18}
+    ],
+    "chart_config": {
+      "type": "bar",
+      "labels": ["6 ano"],
+      "datasets": [
+        {"label": "Alunos por serie", "data": [18]}
+      ]
+    }
+  }
+}
+```
+
+O endpoint aceita apenas `SELECT`. A consulta roda sobre uma tabela temporaria criada a partir do dataset do documento no workspace ativo. O contrato de grafico considera a primeira coluna retornada como eixo X e a segunda coluna numerica como eixo Y.
 
 O parametro `chat_id` e opcional e serve apenas para o botao **Voltar ao chat** retornar para a conversa de origem.
 
@@ -1145,7 +1372,8 @@ CREATE TABLE IF NOT EXISTS chats (
     system_prompt TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    persona_id INTEGER NULL
+    persona_id INTEGER NULL,
+    workspace_id INTEGER NULL
 )
 ```
 
@@ -1155,7 +1383,8 @@ Finalidade:
 - armazenar titulo;
 - registrar ultimo modelo usado;
 - manter prompt associado ao chat;
-- associar chat a persona.
+- associar chat a persona;
+- associar chat ao workspace ativo.
 
 ### 10.3 Tabela `messages`
 
@@ -1173,12 +1402,30 @@ CREATE TABLE IF NOT EXISTS messages (
 
 Observacao importante: apesar da tabela aceitar `system`, o repositorio atualmente persiste apenas mensagens `user` e `assistant`. O system prompt fica no chat/persona e e reinjetado ao montar o contexto.
 
-### 10.4 Tabela `rag_documents`
+### 10.4 Tabela `workspaces`
+
+```sql
+CREATE TABLE IF NOT EXISTS workspaces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT,
+    created_at TEXT NOT NULL
+)
+```
+
+Finalidade:
+
+- representar um espaco de trabalho do usuario;
+- agrupar conversas e documentos RAG por contexto;
+- manter um workspace padrao para dados antigos.
+
+### 10.5 Tabela `rag_documents`
 
 ```sql
 CREATE TABLE IF NOT EXISTS rag_documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_name TEXT NOT NULL UNIQUE,
+    workspace_id INTEGER NULL,
+    source_name TEXT NOT NULL,
     created_at TEXT NOT NULL
 )
 ```
@@ -1187,9 +1434,10 @@ Finalidade:
 
 - representar cada arquivo preparado para RAG;
 - manter um identificador estavel para selecao e exclusao;
+- associar cada documento ao workspace ativo;
 - permitir que arquivos antigos agrupados apenas por `source_name` sejam migrados para um documento formal.
 
-### 10.5 Tabela `document_chunks`
+### 10.6 Tabela `document_chunks`
 
 ```sql
 CREATE TABLE IF NOT EXISTS document_chunks (
@@ -1210,7 +1458,31 @@ Finalidade:
 - vincular cada chunk a `rag_documents.id`;
 - sustentar a busca por similaridade usada no chat e no plugin analitico.
 
-### 10.6 Busca textual de mensagens
+### 10.7 Tabela `analytics_datasets`
+
+```sql
+CREATE TABLE IF NOT EXISTS analytics_datasets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    source_name TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    columns_json TEXT NOT NULL,
+    rows_json TEXT NOT NULL,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+```
+
+Finalidade:
+
+- registrar arquivos estruturados preparados no workspace;
+- manter nome de tabela local, colunas e linhas normalizadas;
+- permitir consultas `SELECT` analiticas antes de renderizar graficos;
+- gerar payload de grafico com eixo X e eixo Y explicitamente separados.
+
+### 10.8 Busca textual de mensagens
 
 ```sql
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
@@ -1219,7 +1491,7 @@ USING fts5(content, chat_id UNINDEXED)
 
 A tabela virtual `messages_fts` e mantida por triggers de insert, update e delete em `messages`. A busca atual da sidebar usa comparacao parcial em `chats.title` e `messages.content`, e a FTS permanece disponivel para evolucoes de ranking e busca textual mais avancada.
 
-### 10.7 Indices
+### 10.9 Indices
 
 Indices criados:
 
@@ -1243,7 +1515,7 @@ Cria diretorio do banco quando necessario, instancia PDO e ativa foreign keys.
 
 ### `App\Database\SqliteMigrator`
 
-Cria tabelas, indices, personas padrao e migra chats antigos para personas.
+Cria tabelas, indices, garante a Persona Base `Assistente Geral`, remove as antigas personas publicas semeadas pelo sistema e migra chats antigos para personas.
 
 ### `App\Repositories\SqliteConversationRepository`
 
@@ -1268,6 +1540,7 @@ Responsavel por:
 - criar persona;
 - atualizar persona;
 - excluir persona;
+- bloquear nomes duplicados com comparacao case-insensitive e accent-insensitive;
 - manter cache de persona ativa por sessao.
 
 ### `App\Repositories\SqliteDocumentChunkRepository`
@@ -1331,6 +1604,30 @@ Faz:
 
 Divide textos longos em chunks menores, com tamanho maximo controlado e pequeno overlap para preservar continuidade entre pedacos.
 
+### `App\Services\StructuredDataParser`
+
+Responsavel por transformar arquivos `.csv` e `.json` em linhas tabulares normalizadas para analise local.
+
+Faz:
+
+- detectar delimitador de CSV;
+- normalizar nomes de colunas para uso em SQL;
+- converter numeros comuns e brasileiros para valores numericos;
+- limitar o volume carregado para manter o processamento local leve.
+
+### `App\Services\WorkspaceAnalyticsService`
+
+Responsavel pela camada analitica do workspace.
+
+Faz:
+
+- registrar datasets estruturados vinculados a documentos RAG;
+- preparar tabelas temporarias para consultas `SELECT`;
+- validar que consultas analiticas nao alterem dados;
+- montar `chart_config` com `labels` e `datasets` para impedir inversao de eixos.
+
+O servico usa `PDO::getAvailableDrivers()` para identificar o driver `duckdb`. Quando ele existe, cada workspace usa um arquivo persistente em `storage/analytics/workspace_<id>.duckdb`, com cache de extensoes em `storage/analytics/extensions` e temporarios em `storage/analytics/tmp`. Sem esse driver, usa SQLite temporario como fallback local.
+
 ### `App\Services\VectorSimilarityService`
 
 Calcula similaridade de cosseno entre embeddings.
@@ -1373,7 +1670,7 @@ Escolhe o modelo padrao com base nos modelos disponiveis e preferencias.
 
 ### `App\Services\ModelMetadataService`
 
-Busca, parseia e cacheia metadados de modelos.
+Busca, parseia e cacheia metadados de modelos via `POST /api/show`, incluindo o teto de contexto usado pela barra do rodape.
 
 ### `App\Services\SizeParser`
 
@@ -1420,6 +1717,7 @@ Faz:
 
 - configura `marked`;
 - inicializa barra de contexto;
+- inicializa seletor de workspaces;
 - inicializa seletor de modelo;
 - inicializa controles de persona;
 - registra eventos de submit do chat;
@@ -1625,10 +1923,10 @@ Ainda nao existe interface de historico para aproveitar esse titulo.
 O modal de metadados depende de:
 
 - Ollama acessivel;
-- comando `ollama` disponivel no ambiente do PHP;
-- saida de `ollama show --verbose` em formato reconhecivel pelas regex.
+- endpoint `POST /api/show` disponivel no Ollama local;
+- resposta com `model_info`, `parameters` ou `modelfile` para detectar o contexto real.
 
-Quando algum campo nao e encontrado, a UI mostra `-`.
+Quando o contexto nao e encontrado, o backend usa `CONTEXT_TOKEN_LIMIT`. Quando outro campo nao e encontrado, a UI mostra `-`.
 
 ## 17. Como executar localmente
 
@@ -1637,6 +1935,7 @@ Requisitos:
 - PHP 8.2 ou superior;
 - extensao PDO SQLite habilitada;
 - extensao cURL habilitada;
+- extensao `pdo_duckdb` opcional para executar a camada analitica no DuckDB;
 - Ollama rodando;
 - pelo menos um modelo instalado no Ollama.
 
@@ -1660,14 +1959,16 @@ http://localhost:11434
 
 ou na URL definida em `OLLAMA_BASE_URL`.
 
+Para ativar DuckDB real na camada analitica, instale a extensao `pdo_duckdb` no PHP usado pelo servidor e confirme que `PDO::getAvailableDrivers()` lista `duckdb`. Sem essa extensao, os mesmos endpoints continuam funcionando com `sqlite-fallback`. Na primeira consulta com agregacoes, o DuckDB pode baixar extensoes oficiais para `storage/analytics/extensions`.
+
 ## 18. Arquivo `.env.example`
 
 O projeto possui um `.env.example` com as variaveis esperadas:
 
 ```env
 OLLAMA_BASE_URL=http://localhost:11434
-DEFAULT_SYSTEM_PROMPT="Você é um assistente técnico prestativo."
-CONTEXT_TOKEN_LIMIT=8000
+DEFAULT_SYSTEM_PROMPT="Você é um assistente técnico, analítico e pragmático. Entenda a intenção da solicitação antes de responder. Priorize clareza, precisão e objetividade. Explique trade-offs quando existirem, não faça suposições sem evidências e deixe explícitas as incertezas quando necessário. Adapte a profundidade e a linguagem ao contexto e ao nível técnico do usuário."
+CONTEXT_TOKEN_LIMIT=8192
 OLLAMA_CONNECT_TIMEOUT=10
 OLLAMA_RESPONSE_TIMEOUT=180
 MODEL_METADATA_CACHE_TTL=3600
@@ -1690,6 +1991,7 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Sanitiza HTML renderizado.
 - [x] Persiste mensagens no SQLite.
 - [x] Busca conversas por titulo ou conteudo das mensagens.
+- [x] Organiza conversas por workspace.
 - [x] Gera titulo curto automaticamente para conversas novas.
 - [x] Calcula uso estimado de contexto.
 - [x] Remove mensagens antigas quando excede limite.
@@ -1708,11 +2010,13 @@ Observacao: o codigo atual le variaveis do ambiente com `getenv()`. Ele nao carr
 - [x] Possui layout responsivo basico.
 - [x] Indexa documentos de texto para RAG local.
 - [x] Usa documentos indexados como contexto opcional no chat.
+- [x] Isola documentos RAG por workspace.
 - [x] Gerencia documentos adicionados com metadados e exclusao em cascata.
 - [x] Exibe a Central de Documentacao pelo menu principal.
 - [x] Ativa/desativa plugins por sessao.
 - [x] Renderiza graficos via plugin `data_analyst` a partir de tabelas Markdown e botao local.
 - [x] Inspeciona arquivos JSON/CSV e sugere consultas analiticas por chips.
+- [x] Registra CSV/JSON como datasets locais por workspace e executa `SELECT` para gerar payload de grafico estruturado.
 
 ## 20. Resumo executivo
 
