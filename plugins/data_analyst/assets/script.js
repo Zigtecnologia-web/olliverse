@@ -9,10 +9,20 @@
 
         deactivate() {
             window.clearTimeout(window.OlliversePlugins.data_analyst.inspectTimer);
-            restoreRagDocumentsHome();
-            document.getElementById('dataInsightsPanel')?.remove();
-            document.getElementById('dataInsightsQuickBtn')?.remove();
-            document.getElementById('dataInsightsDrawerBtn')?.remove();
+            const panel = document.getElementById('dataInsightsPanel');
+            const isCoreSummaryPanel = panel?.dataset.coreSummary === '1';
+
+            if (isCoreSummaryPanel) {
+                document.getElementById('dataInsightsQuickBtn')?.setAttribute('hidden', '');
+                clearInsightsContent();
+                closeInsightsPopover();
+            } else {
+                restoreRagDocumentsHome();
+                panel?.remove();
+                document.getElementById('dataInsightsQuickBtn')?.remove();
+                document.getElementById('dataInsightsDrawerBtn')?.remove();
+            }
+
             removeTablePlotActions();
         },
 
@@ -103,7 +113,14 @@
 
         ensureInsightsControls();
 
-        if (!chatContainer || document.getElementById('dataInsightsPanel')) {
+        if (!chatContainer) {
+            return;
+        }
+
+        if (document.getElementById('dataInsightsPanel')) {
+            ensureInsightsActionBindings();
+            moveRagDocumentsIntoDrawer();
+            updateInsightsPanelVisibility();
             return;
         }
 
@@ -131,16 +148,31 @@
         ].join('');
 
         chatContainer.appendChild(panel);
-        document.getElementById('dataInsightsQuickBtn')?.addEventListener('click', function(event) {
-            event.stopPropagation();
-            generateInsights();
-        });
-        document.getElementById('dataInsightsCloseBtn')?.addEventListener('click', closeInsightsDrawer);
-        if (typeof attachActionTooltip === 'function') {
-            attachActionTooltip(document.getElementById('dataInsightsQuickBtn'));
-        }
+        ensureInsightsActionBindings();
         moveRagDocumentsIntoDrawer();
         updateInsightsPanelVisibility();
+    }
+
+    function ensureInsightsActionBindings() {
+        const quickButton = document.getElementById('dataInsightsQuickBtn');
+        const closeButton = document.getElementById('dataInsightsCloseBtn');
+
+        if (quickButton && quickButton.dataset.dataInsightsBound !== '1') {
+            quickButton.addEventListener('click', function(event) {
+                event.stopPropagation();
+                generateInsights();
+            });
+            quickButton.dataset.dataInsightsBound = '1';
+
+            if (typeof attachActionTooltip === 'function') {
+                attachActionTooltip(quickButton);
+            }
+        }
+
+        if (closeButton && closeButton.dataset.dataInsightsBound !== '1') {
+            closeButton.addEventListener('click', closeInsightsDrawer);
+            closeButton.dataset.dataInsightsBound = '1';
+        }
     }
 
     function ensureInsightsControls() {
@@ -180,32 +212,51 @@
 
     function moveRagDocumentsIntoDrawer() {
         const list = document.getElementById('ragDocumentList');
+        const summary = document.getElementById('ragSelectedSummary');
         const slot = document.getElementById('dataInsightsDocumentsSlot');
 
-        if (!list || !slot || slot.contains(list)) {
+        if (!list || !slot) {
             return;
         }
 
-        if (!document.getElementById('ragDocumentListHome')) {
-            const marker = document.createElement('span');
-            marker.id = 'ragDocumentListHome';
-            marker.hidden = true;
-            list.parentElement?.insertBefore(marker, list);
+        if (!slot.contains(list)) {
+            if (!document.getElementById('ragDocumentListHome')) {
+                const marker = document.createElement('span');
+                marker.id = 'ragDocumentListHome';
+                marker.hidden = true;
+                list.parentElement?.insertBefore(marker, list);
+            }
+
+            slot.appendChild(list);
         }
 
-        slot.appendChild(list);
+        if (summary && !slot.contains(summary)) {
+            if (!document.getElementById('ragSelectedSummaryHome')) {
+                const marker = document.createElement('span');
+                marker.id = 'ragSelectedSummaryHome';
+                marker.hidden = true;
+                summary.parentElement?.insertBefore(marker, summary);
+            }
+
+            slot.appendChild(summary);
+        }
     }
 
     function restoreRagDocumentsHome() {
         const list = document.getElementById('ragDocumentList');
         const marker = document.getElementById('ragDocumentListHome');
+        const summary = document.getElementById('ragSelectedSummary');
+        const summaryMarker = document.getElementById('ragSelectedSummaryHome');
 
-        if (!list || !marker || !marker.parentElement) {
-            return;
+        if (list && marker?.parentElement) {
+            marker.parentElement.insertBefore(list, marker);
+            marker.remove();
         }
 
-        marker.parentElement.insertBefore(list, marker);
-        marker.remove();
+        if (summary && summaryMarker?.parentElement) {
+            summaryMarker.parentElement.insertBefore(summary, summaryMarker);
+            summaryMarker.remove();
+        }
     }
 
     function generateInsights() {

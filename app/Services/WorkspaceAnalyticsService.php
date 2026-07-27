@@ -31,7 +31,7 @@ final readonly class WorkspaceAnalyticsService
     }
 
     /**
-     * @param array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null $dataset
+     * @param array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null $dataset
      * @return array{id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, engine: string}|null
      */
     public function registerDataset(int $documentId, string $sourceName, ?array $dataset): ?array
@@ -41,11 +41,17 @@ final readonly class WorkspaceAnalyticsService
             return null;
         }
 
+        $rowCount = (int) ($dataset['row_count'] ?? count($dataset['rows']));
         $tableName = $this->tableName($documentId, $sourceName);
         $now = date('Y-m-d H:i:s');
         $statement = $this->pdo->prepare(
-            'SELECT id, table_name FROM analytics_datasets
-             WHERE workspace_id = :workspace_id AND document_id = :document_id
+            'SELECT analytics_datasets.id, analytics_datasets.table_name
+             FROM analytics_datasets
+             INNER JOIN rag_documents
+                ON rag_documents.id = analytics_datasets.document_id
+                AND rag_documents.workspace_id = analytics_datasets.workspace_id
+             WHERE analytics_datasets.workspace_id = :workspace_id
+                AND analytics_datasets.document_id = :document_id
              LIMIT 1'
         );
         $statement->execute([
@@ -61,7 +67,7 @@ final readonly class WorkspaceAnalyticsService
             'table_name' => $tableName,
             'columns_json' => json_encode($dataset['columns'], JSON_UNESCAPED_UNICODE),
             'rows_json' => json_encode($dataset['rows'], JSON_UNESCAPED_UNICODE),
-            'row_count' => count($dataset['rows']),
+            'row_count' => $rowCount,
             'updated_at' => $now,
         ];
 
@@ -101,7 +107,7 @@ final readonly class WorkspaceAnalyticsService
             'source_name' => $sourceName,
             'table_name' => $tableName,
             'columns' => $dataset['columns'],
-            'row_count' => count($dataset['rows']),
+            'row_count' => $rowCount,
             'engine' => $this->engineName(),
         ];
     }
@@ -116,7 +122,8 @@ final readonly class WorkspaceAnalyticsService
 
         $statement = $this->pdo->prepare(
             'DELETE FROM analytics_datasets
-             WHERE workspace_id = :workspace_id AND document_id = :document_id'
+             WHERE workspace_id = :workspace_id
+                AND document_id = :document_id'
         );
         $statement->execute([
             'workspace_id' => $this->workspaceId,
@@ -126,14 +133,47 @@ final readonly class WorkspaceAnalyticsService
 
     /**
      * @param array<int, int> $documentIds
+     * @return array<int, array{row_count: int, inspected_rows: int, columns: array<int, string>, empty_columns: array<int, array{column: string, empty_count: int, empty_percent: float}>}>
+     */
+    public function documentSummaries(array $documentIds = []): array
+    {
+        $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
+        $this->backfillMissingDatasets($documentIds);
+
+        $summaries = [];
+
+        foreach ($this->datasets($documentIds) as $dataset) {
+            $rows = $this->rowsForDocument((int) $dataset['document_id']);
+            $summaries[(int) $dataset['document_id']] = [
+                'row_count' => (int) $dataset['row_count'],
+                'inspected_rows' => count($rows),
+                'columns' => $dataset['columns'],
+                'empty_columns' => $this->emptyColumnStats($dataset['columns'], $rows),
+            ];
+        }
+
+        return $summaries;
+    }
+
+    /**
+     * @param array<int, int> $documentIds
      * @return array<int, array{id: int, document_id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, sample: string, engine: string}>
      */
     public function datasets(array $documentIds = []): array
     {
         $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
-        $sql = 'SELECT id, document_id, source_name, table_name, columns_json, rows_json, row_count
+        $sql = 'SELECT analytics_datasets.id,
+                       analytics_datasets.document_id,
+                       analytics_datasets.source_name,
+                       analytics_datasets.table_name,
+                       analytics_datasets.columns_json,
+                       analytics_datasets.rows_json,
+                       analytics_datasets.row_count
                 FROM analytics_datasets
-                WHERE workspace_id = :workspace_id';
+                INNER JOIN rag_documents
+                    ON rag_documents.id = analytics_datasets.document_id
+                    AND rag_documents.workspace_id = analytics_datasets.workspace_id
+                WHERE analytics_datasets.workspace_id = :workspace_id';
         $params = ['workspace_id' => $this->workspaceId];
 
         if ($documentIds !== []) {
@@ -145,10 +185,10 @@ final readonly class WorkspaceAnalyticsService
                 $params[$parameter] = $documentId;
             }
 
-            $sql .= ' AND document_id IN (' . implode(', ', $placeholders) . ')';
+            $sql .= ' AND analytics_datasets.document_id IN (' . implode(', ', $placeholders) . ')';
         }
 
-        $sql .= ' ORDER BY updated_at DESC, source_name ASC';
+        $sql .= ' ORDER BY analytics_datasets.updated_at DESC, analytics_datasets.source_name ASC';
         $statement = $this->pdo->prepare($sql);
         $statement->execute($params);
 
@@ -199,10 +239,15 @@ final readonly class WorkspaceAnalyticsService
      */
     public function chatContext(string $question, string $modelName, OllamaClient $ollamaClient, array $documentIds = []): string
     {
+        $this->backfillMissingDatasets($documentIds);
         $datasets = $this->datasets($documentIds);
 
         if ($datasets === [] || trim($question) === '') {
             return '';
+        }
+
+        if ($this->isRowCountQuestion($question) || $this->isColumnListQuestion($question)) {
+            return $this->datasetCatalogContext($datasets);
         }
 
         try {
@@ -257,9 +302,19 @@ final readonly class WorkspaceAnalyticsService
     private function datasetForDocument(int $documentId): ?array
     {
         $statement = $this->pdo->prepare(
-            'SELECT id, document_id, source_name, table_name, columns_json, rows_json, row_count
+            'SELECT analytics_datasets.id,
+                    analytics_datasets.document_id,
+                    analytics_datasets.source_name,
+                    analytics_datasets.table_name,
+                    analytics_datasets.columns_json,
+                    analytics_datasets.rows_json,
+                    analytics_datasets.row_count
              FROM analytics_datasets
-             WHERE workspace_id = :workspace_id AND document_id = :document_id
+             INNER JOIN rag_documents
+                ON rag_documents.id = analytics_datasets.document_id
+                AND rag_documents.workspace_id = analytics_datasets.workspace_id
+             WHERE analytics_datasets.workspace_id = :workspace_id
+                AND analytics_datasets.document_id = :document_id
              LIMIT 1'
         );
         $statement->execute([
@@ -269,6 +324,61 @@ final readonly class WorkspaceAnalyticsService
         $dataset = $statement->fetch();
 
         return is_array($dataset) ? $dataset : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function rowsForDocument(int $documentId): array
+    {
+        $dataset = $this->datasetForDocument($documentId);
+
+        return is_array($dataset) ? $this->decodeRows((string) $dataset['rows_json']) : [];
+    }
+
+    /**
+     * @param array<int, string> $columns
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array{column: string, empty_count: int, empty_percent: float}>
+     */
+    private function emptyColumnStats(array $columns, array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        $stats = [];
+        $rowCount = count($rows);
+
+        foreach ($columns as $column) {
+            $emptyCount = 0;
+
+            foreach ($rows as $row) {
+                if (!array_key_exists($column, $row) || $this->isEmptyCell($row[$column])) {
+                    $emptyCount++;
+                }
+            }
+
+            if ($emptyCount > 0) {
+                $stats[] = [
+                    'column' => $column,
+                    'empty_count' => $emptyCount,
+                    'empty_percent' => round(($emptyCount / $rowCount) * 100, 1),
+                ];
+            }
+        }
+
+        usort(
+            $stats,
+            static fn (array $left, array $right): int => $right['empty_count'] <=> $left['empty_count']
+        );
+
+        return $stats;
+    }
+
+    private function isEmptyCell(mixed $value): bool
+    {
+        return $value === null || (is_string($value) && trim($value) === '');
     }
 
     /**
@@ -617,6 +727,107 @@ final readonly class WorkspaceAnalyticsService
     }
 
     /**
+     * @param array<int, int> $documentIds
+     */
+    private function backfillMissingDatasets(array $documentIds): void
+    {
+        $documentIds = array_values(array_unique(array_filter($documentIds, static fn (int $id): bool => $id > 0)));
+
+        if ($documentIds === []) {
+            return;
+        }
+
+        $placeholders = [];
+        $params = ['workspace_id' => $this->workspaceId];
+
+        foreach ($documentIds as $index => $documentId) {
+            $parameter = ':document_id_' . $index;
+            $placeholders[] = $parameter;
+            $params[$parameter] = $documentId;
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT rag_documents.id, rag_documents.source_name
+             FROM rag_documents
+             LEFT JOIN analytics_datasets
+                ON analytics_datasets.document_id = rag_documents.id
+                AND analytics_datasets.workspace_id = rag_documents.workspace_id
+             WHERE rag_documents.workspace_id = :workspace_id
+                AND rag_documents.id IN (' . implode(', ', $placeholders) . ')
+                AND analytics_datasets.id IS NULL'
+        );
+        $statement->execute($params);
+
+        foreach ($statement->fetchAll() as $document) {
+            $documentId = (int) $document['id'];
+            $sourceName = (string) $document['source_name'];
+
+            if (!$this->isStructuredSource($sourceName)) {
+                continue;
+            }
+
+            $content = $this->reconstructDocumentContent($documentId);
+            $dataset = $this->parser->parse($sourceName, $content);
+
+            if ($dataset !== null) {
+                $this->registerDataset($documentId, $sourceName, $dataset);
+            }
+        }
+    }
+
+    private function isStructuredSource(string $sourceName): bool
+    {
+        return in_array(strtolower(pathinfo($sourceName, PATHINFO_EXTENSION)), ['csv', 'json', 'xls', 'xlsx'], true);
+    }
+
+    private function reconstructDocumentContent(int $documentId): string
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT document_chunks.content
+             FROM document_chunks
+             INNER JOIN rag_documents ON rag_documents.id = document_chunks.document_id
+             WHERE document_chunks.document_id = :document_id
+                AND rag_documents.workspace_id = :workspace_id
+             ORDER BY document_chunks.id ASC'
+        );
+        $statement->execute([
+            'document_id' => $documentId,
+            'workspace_id' => $this->workspaceId,
+        ]);
+
+        $content = '';
+
+        foreach ($statement->fetchAll() as $chunk) {
+            $content = $this->appendChunkContent($content, (string) $chunk['content']);
+        }
+
+        return $content;
+    }
+
+    private function appendChunkContent(string $content, string $chunk): string
+    {
+        $chunk = trim($chunk);
+
+        if ($chunk === '') {
+            return $content;
+        }
+
+        if ($content === '') {
+            return $chunk;
+        }
+
+        $maxOverlap = min(300, strlen($content), strlen($chunk));
+
+        for ($length = $maxOverlap; $length > 0; $length--) {
+            if (substr($content, -$length) === substr($chunk, 0, $length)) {
+                return $content . substr($chunk, $length);
+            }
+        }
+
+        return rtrim($content) . "\n\n" . $chunk;
+    }
+
+    /**
      * @param array<int, array{id: int, document_id: int, source_name: string, table_name: string, columns: array<int, string>, row_count: int, sample: string, engine: string}> $datasets
      * @return array{document_id: int, sql: string}|null
      */
@@ -696,7 +907,8 @@ final readonly class WorkspaceAnalyticsService
         $lines = [
             'Contexto analítico local disponível:',
             'Há documentos estruturados selecionados, mas nenhuma consulta DuckDB segura foi executada antes desta resposta.',
-            'Use o catálogo abaixo apenas para orientar a resposta e peça uma pergunta mais específica se precisar calcular valores.',
+            'Para perguntas sobre quantidade de linhas/registros, responda diretamente usando o campo "linhas" abaixo.',
+            'Para perguntas sobre colunas/campos, responda diretamente copiando a lista real do campo "colunas" abaixo. Nunca diga que a lista é hipotética.',
         ];
 
         foreach ($datasets as $dataset) {
@@ -711,6 +923,36 @@ final readonly class WorkspaceAnalyticsService
         }
 
         return implode("\n", $lines);
+    }
+
+    private function isRowCountQuestion(string $question): bool
+    {
+        $question = $this->normalizeQuestionText($question);
+
+        return preg_match('/\b(quantas?|total|numero|qtd|quantidade)\b.*\b(linhas?|registros?|rows?)\b/', $question) === 1
+            || preg_match('/\b(linhas?|registros?|rows?)\b.*\b(quantas?|total|numero|qtd|quantidade)\b/', $question) === 1;
+    }
+
+    private function isColumnListQuestion(string $question): bool
+    {
+        $question = $this->normalizeQuestionText($question);
+
+        return preg_match('/\b(quais?|listar?|liste|mostre|mostrar|nomes?)\b.*\b(colunas?|campos?|fields?|columns?)\b/', $question) === 1
+            || preg_match('/\b(colunas?|campos?|fields?|columns?)\b.*\b(quais?|listar?|liste|mostre|mostrar|nomes?)\b/', $question) === 1;
+    }
+
+    private function normalizeQuestionText(string $question): string
+    {
+        $question = strtr(trim($question), [
+            'Á' => 'A', 'À' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'A', 'á' => 'a', 'à' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a',
+            'É' => 'E', 'È' => 'E', 'Ê' => 'E', 'Ë' => 'E', 'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
+            'Í' => 'I', 'Ì' => 'I', 'Î' => 'I', 'Ï' => 'I', 'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
+            'Ó' => 'O', 'Ò' => 'O', 'Ô' => 'O', 'Õ' => 'O', 'Ö' => 'O', 'ó' => 'o', 'ò' => 'o', 'ô' => 'o', 'õ' => 'o', 'ö' => 'o',
+            'Ú' => 'U', 'Ù' => 'U', 'Û' => 'U', 'Ü' => 'U', 'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+            'Ç' => 'C', 'ç' => 'c',
+        ]);
+
+        return strtolower($question);
     }
 
     /**

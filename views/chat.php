@@ -150,6 +150,7 @@
                 <span id="ragStatus" class="rag-status" aria-live="polite"></span>
             </form>
             <div id="ragDocumentList" class="rag-document-list" aria-live="polite"></div>
+            <div id="ragSelectedSummary" class="rag-selected-summary" aria-live="polite"></div>
             </div>
         </div>
     </div>

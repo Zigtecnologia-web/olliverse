@@ -366,6 +366,11 @@
     width: 100%;
 }
 
+.data-insights-documents-slot .rag-selected-summary {
+    margin-top: 8px;
+    max-height: 260px;
+}
+
 .data-insights-documents-slot .rag-documents-menu,
 .data-insights-documents-slot .rag-documents-menu-btn {
     width: 100%;
