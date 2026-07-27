@@ -390,7 +390,7 @@ if (($_GET['action'] ?? '') === 'model_metadata') {
 if (in_array(($_GET['action'] ?? ''), ['rag_documents', 'rag_documents_list'], true)) {
     jsonResponse([
         'success' => true,
-        'documents' => $documentChunkRepository->sources(),
+        'documents' => ragDocumentsWithAnalytics($documentChunkRepository, $workspaceAnalyticsService),
     ]);
 }
 
@@ -404,7 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_in
             (string) $upload['content']
         );
 
-        jsonResponse($payload + ['documents' => $documentChunkRepository->sources()]);
+        jsonResponse($payload + ['documents' => ragDocumentsWithAnalytics($documentChunkRepository, $workspaceAnalyticsService)]);
     } catch (Throwable $error) {
         clearJsonUploadGuard();
 
@@ -443,7 +443,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_ch
             'complete' => true,
             'received' => $chunk['received'],
             'total' => $chunk['total'],
-            'documents' => $documentChunkRepository->sources(),
+            'documents' => ragDocumentsWithAnalytics($documentChunkRepository, $workspaceAnalyticsService),
         ]);
     } catch (Throwable $error) {
         clearJsonUploadGuard();
@@ -461,17 +461,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'rag_ch
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array(($_GET['action'] ?? ''), ['rag_delete', 'rag_document_delete'], true)) {
     try {
-        $deleted = $documentChunkRepository->deleteDocument((int) ($_POST['document_id'] ?? 0));
+        $documentId = (int) ($_POST['document_id'] ?? 0);
+
+        $workspaceAnalyticsService->deleteDocumentDataset($documentId);
+        $deleted = $documentChunkRepository->deleteDocument($documentId);
 
         if (!$deleted) {
             throw new RuntimeException('Documento não encontrado para exclusão.');
         }
 
-        $workspaceAnalyticsService->deleteDocumentDataset((int) ($_POST['document_id'] ?? 0));
-
         jsonResponse([
             'success' => true,
-            'documents' => $documentChunkRepository->sources(),
+            'documents' => ragDocumentsWithAnalytics($documentChunkRepository, $workspaceAnalyticsService),
         ]);
     } catch (Throwable $error) {
         jsonResponse([
@@ -849,7 +850,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['prompt'])) {
 
 $initialAssistantMessage = 'Olá! O Olliverse local está pronto. O que deseja processar ou refatorar hoje?';
 $initialMessages = $conversationRepository->messages();
-$initialRagDocuments = $documentChunkRepository->sources();
+$initialRagDocuments = ragDocumentsWithAnalytics($documentChunkRepository, $workspaceAnalyticsService);
 $initialChatHistory = $chatHistoryRepository->all();
 $initialWorkspaces = $workspaceRepository->all();
 $availablePlugins = $pluginManager->all();
@@ -928,12 +929,44 @@ function workspacePayload(
         'chat_id' => $chatId,
         'messages' => $messages,
         'active_persona' => $activePersona,
-        'documents' => $documentChunkRepository->sources(),
+        'documents' => ragDocumentsWithAnalytics(
+            $documentChunkRepository,
+            new WorkspaceAnalyticsService(
+                $pdo,
+                new StructuredDataParser(),
+                $workspaceId,
+                __DIR__ . '/storage/analytics'
+            )
+        ),
         'chats' => $chats,
         'context_usage' => $contextWindowService->usage(
             $contextWindowService->withSystemPrompt($systemPrompt, $messages)
         ),
     ];
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function ragDocumentsWithAnalytics(
+    SqliteDocumentChunkRepository $documentChunkRepository,
+    WorkspaceAnalyticsService $workspaceAnalyticsService
+): array {
+    $documents = $documentChunkRepository->sources();
+    $summaries = $workspaceAnalyticsService->documentSummaries(array_map(
+        static fn (array $document): int => (int) $document['id'],
+        $documents
+    ));
+
+    return array_map(static function (array $document) use ($summaries): array {
+        $documentId = (int) $document['id'];
+
+        if (isset($summaries[$documentId])) {
+            $document['analytics_summary'] = $summaries[$documentId];
+        }
+
+        return $document;
+    }, $documents);
 }
 
 function iconeEnviar(): string

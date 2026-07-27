@@ -106,14 +106,15 @@ final readonly class SqliteMigrator
             )'
         );
 
-        $this->ensureWorkspaceAwareRagDocuments($defaultWorkspaceId);
-        $this->migrateAnalyticsDatasets();
-
         if (!$this->hasColumn('document_chunks', 'document_id')) {
             $this->pdo->exec('ALTER TABLE document_chunks ADD COLUMN document_id INTEGER NULL');
         }
 
+        $this->ensureWorkspaceAwareRagDocuments($defaultWorkspaceId);
+        $this->migrateAnalyticsDatasets();
         $this->attachExistingChunksToDocuments();
+        $this->ensureWorkspaceAwareRagDocuments($defaultWorkspaceId);
+        $this->deleteOrphanedAnalyticsDatasets();
 
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id ON messages(chat_id, id)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at)');
@@ -428,7 +429,12 @@ final readonly class SqliteMigrator
     private function attachExistingChunksToDocuments(): void
     {
         $sources = $this->pdo
-            ->query('SELECT source_name, MIN(created_at) AS created_at FROM document_chunks GROUP BY source_name')
+            ->query(
+                'SELECT source_name, MIN(created_at) AS created_at
+                 FROM document_chunks
+                 WHERE document_id IS NULL
+                 GROUP BY source_name'
+            )
             ->fetchAll();
 
         foreach ($sources as $source) {
@@ -453,8 +459,15 @@ final readonly class SqliteMigrator
 
     private function findOrCreateRagDocument(string $sourceName, string $createdAt): int
     {
-        $statement = $this->pdo->prepare('SELECT id FROM rag_documents WHERE source_name = :source_name LIMIT 1');
-        $statement->execute(['source_name' => $sourceName]);
+        $statement = $this->pdo->prepare(
+            'SELECT id FROM rag_documents
+             WHERE source_name = :source_name AND workspace_id = :workspace_id
+             LIMIT 1'
+        );
+        $statement->execute([
+            'source_name' => $sourceName,
+            'workspace_id' => $this->defaultWorkspaceId(),
+        ]);
         $id = $statement->fetchColumn();
 
         if ($id !== false) {
@@ -462,15 +475,35 @@ final readonly class SqliteMigrator
         }
 
         $statement = $this->pdo->prepare(
-            'INSERT INTO rag_documents (source_name, created_at)
-             VALUES (:source_name, :created_at)'
+            'INSERT INTO rag_documents (workspace_id, source_name, created_at)
+             VALUES (:workspace_id, :source_name, :created_at)'
         );
         $statement->execute([
+            'workspace_id' => $this->defaultWorkspaceId(),
             'source_name' => $sourceName,
             'created_at' => $createdAt !== '' ? $createdAt : date('Y-m-d H:i:s'),
         ]);
 
         return (int) $this->pdo->lastInsertId();
+    }
+
+    private function defaultWorkspaceId(): int
+    {
+        $workspaceId = $this->pdo->query('SELECT id FROM workspaces ORDER BY id ASC LIMIT 1')->fetchColumn();
+
+        return $workspaceId === false ? 1 : (int) $workspaceId;
+    }
+
+    private function deleteOrphanedAnalyticsDatasets(): void
+    {
+        $this->pdo->exec(
+            'DELETE FROM analytics_datasets
+             WHERE NOT EXISTS (
+                SELECT 1 FROM rag_documents
+                WHERE rag_documents.id = analytics_datasets.document_id
+                    AND rag_documents.workspace_id = analytics_datasets.workspace_id
+             )'
+        );
     }
 
     private function attachExistingChatsToPersonas(): void

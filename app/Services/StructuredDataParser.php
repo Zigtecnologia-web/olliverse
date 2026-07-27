@@ -9,7 +9,7 @@ final readonly class StructuredDataParser
     private const MAX_ROWS = 5000;
 
     /**
-     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
      */
     public function parse(string $sourceName, string $content): ?array
     {
@@ -18,12 +18,13 @@ final readonly class StructuredDataParser
         return match ($extension) {
             'csv' => $this->parseCsv($content),
             'json' => $this->parseJson($content),
+            'xls', 'xlsx' => $this->parseSpreadsheetText($content),
             default => null,
         };
     }
 
     /**
-     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
      */
     public function parseFile(string $sourceName, string $filePath): ?array
     {
@@ -39,7 +40,7 @@ final readonly class StructuredDataParser
     }
 
     /**
-     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
      */
     private function parseCsv(string $content): ?array
     {
@@ -59,7 +60,7 @@ final readonly class StructuredDataParser
         rewind($handle);
 
         $delimiter = $this->detectDelimiter($content);
-        $header = fgetcsv($handle, 0, $delimiter);
+        $header = fgetcsv($handle, 0, $delimiter, '"', '');
 
         if (!is_array($header) || count($header) < 2) {
             fclose($handle);
@@ -70,7 +71,9 @@ final readonly class StructuredDataParser
         $columns = $this->normalizeColumns(array_map(static fn (mixed $column): string => (string) $column, $header));
         $rows = [];
 
-        while (($row = fgetcsv($handle, 0, $delimiter)) !== false && count($rows) < self::MAX_ROWS) {
+        $rowCount = 0;
+
+        while (($row = fgetcsv($handle, 0, $delimiter, '"', '')) !== false) {
             if (!is_array($row) || $this->isEmptyRow($row)) {
                 continue;
             }
@@ -79,7 +82,11 @@ final readonly class StructuredDataParser
                 continue;
             }
 
-            $rows[] = $this->combineRow($columns, $row);
+            $rowCount++;
+
+            if (count($rows) < self::MAX_ROWS) {
+                $rows[] = $this->combineRow($columns, $row);
+            }
         }
 
         fclose($handle);
@@ -92,11 +99,12 @@ final readonly class StructuredDataParser
             'columns' => $columns,
             'rows' => $rows,
             'sample' => $this->sampleText($columns, $rows),
+            'row_count' => $rowCount,
         ];
     }
 
     /**
-     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
      */
     private function parseCsvFile(string $filePath): ?array
     {
@@ -115,7 +123,7 @@ final readonly class StructuredDataParser
 
         rewind($handle);
         $delimiter = $this->detectDelimiter($firstLine);
-        $header = fgetcsv($handle, 0, $delimiter);
+        $header = fgetcsv($handle, 0, $delimiter, '"', '');
 
         if (!is_array($header) || count($header) < 2) {
             fclose($handle);
@@ -126,12 +134,18 @@ final readonly class StructuredDataParser
         $columns = $this->normalizeColumns(array_map(static fn (mixed $column): string => (string) $column, $header));
         $rows = [];
 
-        while (($row = fgetcsv($handle, 0, $delimiter)) !== false && count($rows) < self::MAX_ROWS) {
+        $rowCount = 0;
+
+        while (($row = fgetcsv($handle, 0, $delimiter, '"', '')) !== false) {
             if (!is_array($row) || $this->isEmptyRow($row) || count($row) !== $headerCount) {
                 continue;
             }
 
-            $rows[] = $this->combineRow($columns, $row);
+            $rowCount++;
+
+            if (count($rows) < self::MAX_ROWS) {
+                $rows[] = $this->combineRow($columns, $row);
+            }
         }
 
         fclose($handle);
@@ -144,11 +158,12 @@ final readonly class StructuredDataParser
             'columns' => $columns,
             'rows' => $rows,
             'sample' => $this->sampleText($columns, $rows),
+            'row_count' => $rowCount,
         ];
     }
 
     /**
-     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string}|null
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
      */
     private function parseJson(string $content): ?array
     {
@@ -184,6 +199,64 @@ final readonly class StructuredDataParser
             'columns' => $columns,
             'rows' => $normalizedRows,
             'sample' => $this->sampleText($columns, $normalizedRows),
+            'row_count' => count($rows),
+        ];
+    }
+
+    /**
+     * Parses the text export generated in the browser for XLS/XLSX uploads.
+     *
+     * @return array{columns: array<int, string>, rows: array<int, array<string, mixed>>, sample: string, row_count?: int}|null
+     */
+    private function parseSpreadsheetText(string $content): ?array
+    {
+        $blocks = preg_split('/\R{2,}/', trim($content)) ?: [];
+        $columns = [];
+        $rows = [];
+        $rowCount = 0;
+
+        foreach ($blocks as $block) {
+            $csvLines = array_values(array_filter(
+                preg_split('/\R/', trim($block)) ?: [],
+                static fn (string $line): bool => !str_starts_with($line, 'Arquivo: ')
+                    && !str_starts_with($line, 'Aba: ')
+                    && trim($line) !== ''
+            ));
+
+            if (count($csvLines) < 2) {
+                continue;
+            }
+
+            $dataset = $this->parseCsv(implode("\n", $csvLines));
+
+            if ($dataset === null) {
+                continue;
+            }
+
+            if ($columns === []) {
+                $columns = $dataset['columns'];
+            }
+
+            if ($dataset['columns'] !== $columns) {
+                continue;
+            }
+
+            $rowCount += (int) ($dataset['row_count'] ?? count($dataset['rows']));
+
+            if (count($rows) < self::MAX_ROWS) {
+                $rows = array_slice(array_merge($rows, $dataset['rows']), 0, self::MAX_ROWS);
+            }
+        }
+
+        if ($columns === [] || $rows === []) {
+            return null;
+        }
+
+        return [
+            'columns' => $columns,
+            'rows' => $rows,
+            'sample' => $this->sampleText($columns, $rows),
+            'row_count' => $rowCount,
         ];
     }
 

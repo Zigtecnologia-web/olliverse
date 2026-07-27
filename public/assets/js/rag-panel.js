@@ -8,6 +8,8 @@ function initRagPanel() {
     const pickFileBtn = document.getElementById('ragPickFileBtn');
     const managerBtn = document.getElementById('ragManagerBtn');
 
+    initRagSummaryDrawer();
+
     if (typeof attachActionTooltip === 'function') {
         if (pickFileBtn) attachActionTooltip(pickFileBtn);
         if (managerBtn) attachActionTooltip(managerBtn);
@@ -90,6 +92,150 @@ function setRagDocumentControlsDisabled(disabled) {
         .forEach((control) => {
             control.disabled = disabled;
         });
+}
+
+function initRagSummaryDrawer() {
+    ensureRagSummaryDrawer();
+    moveRagSummaryIntoDrawer();
+    updateRagSummaryDrawerVisibility();
+}
+
+function ensureRagSummaryDrawer() {
+    const form = document.getElementById('ragUploadForm');
+    const chatContainer = document.querySelector('.chat-container');
+
+    if (form && !document.getElementById('dataInsightsDrawerBtn')) {
+        const drawerButton = document.createElement('button');
+
+        drawerButton.type = 'button';
+        drawerButton.id = 'dataInsightsDrawerBtn';
+        drawerButton.className = 'secondary-config-btn data-insights-action-btn';
+        drawerButton.setAttribute('aria-label', 'Resumo do documento');
+        drawerButton.setAttribute('title', 'Resumo do documento');
+        drawerButton.setAttribute('data-tooltip', 'Resumo do documento');
+        drawerButton.textContent = 'Resumo';
+        drawerButton.hidden = true;
+        drawerButton.addEventListener('click', function(event) {
+            event.stopPropagation();
+            openRagSummaryDrawer();
+        });
+        form.appendChild(drawerButton);
+
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(drawerButton);
+        }
+    }
+
+    if (chatContainer && !document.getElementById('dataInsightsPanel')) {
+        const panel = document.createElement('div');
+
+        panel.id = 'dataInsightsPanel';
+        panel.className = 'data-insights-drawer';
+        panel.dataset.coreSummary = '1';
+        panel.hidden = true;
+        panel.setAttribute('aria-hidden', 'true');
+        panel.innerHTML = [
+            '<div class="data-insights-drawer-header">',
+            '<div>',
+            '<strong>Resumo do documento</strong>',
+            '<div id="dataInsightsStatus" class="data-insights-status" aria-live="polite"></div>',
+            '</div>',
+            '<div class="data-insights-drawer-actions">',
+            '<button type="button" id="dataInsightsQuickBtn" class="secondary-config-btn data-insights-action-btn" aria-label="Gerar insights" title="Gerar insights" data-tooltip="Gerar insights" hidden>Gerar insights</button>',
+            '<button type="button" id="dataInsightsCloseBtn" class="data-insights-close-btn" aria-label="Fechar resumo">x</button>',
+            '</div>',
+            '</div>',
+            '<div class="data-insights-documents">',
+            '<span class="chips-label">Documentos</span>',
+            '<div id="dataInsightsDocumentsSlot" class="data-insights-documents-slot"></div>',
+            '</div>',
+            '<div id="dataInsightsContent" class="data-insights-content"></div>',
+            '<div id="dataInsightsPopover" class="data-insights-popover" hidden></div>',
+        ].join('');
+
+        chatContainer.appendChild(panel);
+        document.getElementById('dataInsightsCloseBtn')?.addEventListener('click', closeRagSummaryDrawer);
+        if (typeof attachActionTooltip === 'function') {
+            attachActionTooltip(document.getElementById('dataInsightsQuickBtn'));
+        }
+    }
+}
+
+function moveRagSummaryIntoDrawer() {
+    const list = document.getElementById('ragDocumentList');
+    const summary = document.getElementById('ragSelectedSummary');
+    const slot = document.getElementById('dataInsightsDocumentsSlot');
+
+    if (!list || !slot) {
+        return;
+    }
+
+    if (!slot.contains(list)) {
+        if (!document.getElementById('ragDocumentListHome')) {
+            const marker = document.createElement('span');
+            marker.id = 'ragDocumentListHome';
+            marker.hidden = true;
+            list.parentElement?.insertBefore(marker, list);
+        }
+
+        slot.appendChild(list);
+    }
+
+    if (summary && !slot.contains(summary)) {
+        if (!document.getElementById('ragSelectedSummaryHome')) {
+            const marker = document.createElement('span');
+            marker.id = 'ragSelectedSummaryHome';
+            marker.hidden = true;
+            summary.parentElement?.insertBefore(marker, summary);
+        }
+
+        slot.appendChild(summary);
+    }
+}
+
+function updateRagSummaryDrawerVisibility() {
+    const drawerButton = document.getElementById('dataInsightsDrawerBtn');
+    const panel = document.getElementById('dataInsightsPanel');
+    const hasDocuments = document.querySelectorAll('.rag-document-checkbox').length > 0;
+
+    if (drawerButton) {
+        drawerButton.hidden = !hasDocuments;
+    }
+
+    if (panel) {
+        panel.hidden = false;
+        panel.classList.toggle('available', hasDocuments);
+    }
+
+    if (!hasDocuments) {
+        closeRagSummaryDrawer();
+    }
+}
+
+function openRagSummaryDrawer() {
+    ensureRagSummaryDrawer();
+    moveRagSummaryIntoDrawer();
+    updateRagSummaryDrawerVisibility();
+
+    const panel = document.getElementById('dataInsightsPanel');
+
+    if (!panel || !panel.classList.contains('available')) {
+        return;
+    }
+
+    panel.classList.add('open');
+    panel.setAttribute('aria-hidden', 'false');
+}
+
+function closeRagSummaryDrawer() {
+    const panel = document.getElementById('dataInsightsPanel');
+
+    if (!panel) {
+        return;
+    }
+
+    panel.classList.remove('open');
+    panel.setAttribute('aria-hidden', 'true');
 }
 
 function uploadRagDocument() {
@@ -421,6 +567,8 @@ function renderRagDocuments(documents) {
         empty.className = 'rag-document-empty';
         empty.textContent = 'Nenhum documento adicionado';
         container.appendChild(empty);
+        renderSelectedRagSummary([]);
+        updateRagSummaryDrawerVisibility();
         closeRagDocumentsMenu();
         document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
         return;
@@ -464,6 +612,7 @@ function renderRagDocuments(documents) {
             || !previousDocumentIds.has(documentId);
         checkbox.addEventListener('change', function() {
             updateRagDocumentBadge();
+            renderSelectedRagSummary(documents);
         });
         text.className = 'rag-document-name';
         text.textContent = `${sourceName} (${documentInfo.chunks})`;
@@ -488,6 +637,9 @@ function renderRagDocuments(documents) {
     menu.appendChild(popover);
     container.appendChild(menu);
     updateRagDocumentBadge();
+    renderSelectedRagSummary(documents);
+    moveRagSummaryIntoDrawer();
+    updateRagSummaryDrawerVisibility();
     document.dispatchEvent(new CustomEvent('olliverse:rag-documents-rendered'));
 }
 
@@ -605,6 +757,135 @@ function renderRagManagerDocuments(documents) {
     container.appendChild(table);
 }
 
+function renderSelectedRagSummary(documents) {
+    const container = document.getElementById('ragSelectedSummary');
+
+    if (!container) {
+        return;
+    }
+
+    const selectedIds = new Set(getSelectedRagDocumentIds());
+    const selectedDocuments = documents.filter((documentInfo) => selectedIds.has(Number(documentInfo.id || 0)));
+
+    container.innerHTML = '';
+    container.hidden = true;
+
+    if (selectedDocuments.length === 0) {
+        return;
+    }
+
+    selectedDocuments.forEach((documentInfo) => {
+        const card = document.createElement('div');
+        const title = document.createElement('div');
+
+        card.className = 'rag-selected-summary-card';
+        title.className = 'rag-selected-summary-title';
+        title.textContent = documentInfo.source_name || 'Documento';
+        card.appendChild(title);
+        card.appendChild(createRagAnalyticsSummary(documentInfo.analytics_summary || null));
+        container.appendChild(card);
+    });
+
+    container.hidden = false;
+}
+
+function createRagAnalyticsSummary(summary) {
+    const container = document.createElement('div');
+
+    container.className = 'rag-summary';
+
+    if (!summary || !Array.isArray(summary.columns)) {
+        const empty = document.createElement('span');
+        empty.className = 'rag-summary-empty';
+        empty.textContent = 'Sem resumo analítico disponível';
+        container.appendChild(empty);
+        return container;
+    }
+
+    const metrics = document.createElement('div');
+    const rowCount = Number(summary.row_count || 0);
+    const inspectedRows = Number(summary.inspected_rows || 0);
+    const columns = summary.columns
+        .map((column) => String(column || ''))
+        .filter((column) => column && !isSchoolSummaryField(column));
+    const emptyColumns = Array.isArray(summary.empty_columns) ? summary.empty_columns : [];
+
+    metrics.className = 'rag-summary-metrics';
+    metrics.appendChild(createRagMetric('Linhas', formatInteger(rowCount)));
+    metrics.appendChild(createRagMetric('Campos', formatInteger(columns.length)));
+
+    if (inspectedRows > 0 && inspectedRows < rowCount) {
+        metrics.appendChild(createRagMetric('Inspecionadas', formatInteger(inspectedRows)));
+    }
+
+    container.appendChild(metrics);
+    container.appendChild(createRagSummarySection('Campos existentes', columns));
+
+    const visibleEmptyColumns = emptyColumns.filter((item) => !isSchoolSummaryField(String(item.column || '')));
+
+    if (visibleEmptyColumns.length > 0) {
+        container.appendChild(createRagSummarySection(
+            'Campos com null/vazios',
+            visibleEmptyColumns.map((item) => {
+                const column = String(item.column || '');
+                const count = formatInteger(Number(item.empty_count || 0));
+                const percent = Number(item.empty_percent || 0).toLocaleString('pt-BR', {
+                    maximumFractionDigits: 1,
+                });
+
+                return `${column}: ${count} (${percent}%)`;
+            })
+        ));
+    } else {
+        container.appendChild(createRagSummarySection('Campos com null/vazios', ['Nenhum campo com vazios']));
+    }
+
+    return container;
+}
+
+function isSchoolSummaryField(column) {
+    return String(column || '').toLowerCase().includes('school')
+        || String(column || '').toLowerCase().includes('escola');
+}
+
+function createRagMetric(label, value) {
+    const metric = document.createElement('span');
+    const labelEl = document.createElement('span');
+    const valueEl = document.createElement('strong');
+
+    metric.className = 'rag-summary-metric';
+    labelEl.textContent = label;
+    valueEl.textContent = value;
+    metric.appendChild(labelEl);
+    metric.appendChild(valueEl);
+
+    return metric;
+}
+
+function createRagSummarySection(title, values) {
+    const section = document.createElement('div');
+    const heading = document.createElement('div');
+    const list = document.createElement('ul');
+
+    section.className = 'rag-summary-section';
+    heading.className = 'rag-summary-heading';
+    heading.textContent = title;
+    list.className = 'rag-summary-list';
+
+    values.forEach((value) => {
+        const item = document.createElement('li');
+
+        item.className = 'rag-summary-item';
+        item.textContent = value;
+        list.appendChild(item);
+    });
+
+    section.appendChild(heading);
+    section.appendChild(list);
+
+    return section;
+}
+
 function setRagManagerStatus(message, isError = false) {
     const status = document.getElementById('ragManagerStatus');
 
@@ -653,6 +934,12 @@ function formatBytes(bytes) {
     }
 
     return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatInteger(value) {
+    const number = Number(value || 0);
+
+    return Number.isFinite(number) ? number.toLocaleString('pt-BR') : '0';
 }
 
 function getSelectedDocumentCheckboxes() {
